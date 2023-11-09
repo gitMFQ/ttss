@@ -138,8 +138,3 @@ Content-Type: text/plain
 2022-07-01：~~部署在中国大陆以外服务器上的服务目前只能选择 `webm-24khz-16bit-mono-opus` 格式的音频了！~~ 所以使用 Vercel 的用户需要重新部署一下。
 
 2022-06-16：Edge 浏览器提供的接口现在已经不能设置讲话风格了，若发现不能正常使用，请参考 [#12](https://github.com/wxxxcxx/ms-ra-forwarder/issues/12#issuecomment-1157271193) 获取更新。
-
-
-感谢以下组织/个人对本项目的支持
-
-<img width="80" src="https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.png" />
