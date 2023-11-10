@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh_CN">
 
 <head>
-  <title>ms-ra-forwarder</title>
+  <title>ttss</title>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"
@@ -12,7 +12,7 @@
 <body>
   <nav class="navbar navbar-light bg-light">
     <div class="container-fluid">
-      <a class="navbar-brand" target="_blank" href="https://github.com/meetcw/ms-ra-forwarder">ms-ra-forwarder</a>
+      <a class="navbar-brand" target="_blank" href="https://github.com/meetcw/ms-ra-forwarder">ttss</a>
       <ul class="navbar-nav">
         <li class="nav-item">
           <a class="github-button" href="https://github.com/meetcw/ms-ra-forwarder" data-size="large"
@@ -174,6 +174,121 @@
       return ssml;
     }
 
+
+
+
+
+
+
+    let headers = { 'Content-Type': 'text/plain' }; 
+    let voiceName = document.getElementsByName('voiceName')[0].value; 
+    let voiceFormat = document.getElementsByName('voiceFormat')[0].value; 
+    let token = document.getElementsByName('token')[0].value; 
+    let previewText = document.getElementsByName('previewText')[0].value; 
+    let ssml = createSSML(previewText, voiceName) 
+    if (token) { headers['Authorization'] = 'Bearer ' + token; } headers['Format'] = voiceFormat; 
+    let button = document.getElementById('previewButton'); 
+    button.disabled = true; 
+    let ctx = new AudioContext(); 
+    let audioBuffer; 
+    fetch('/api/ra', { 
+      method: 'post', headers: headers, body: ssml 
+    }).then(response => { 
+      if (response.status == 200) { 
+        return response.arrayBuffer() 
+      } else if (response.status == 401) { 
+        throw '无效的密钥'; 
+      } else { 
+        return response.text().then(text => Promise.reject(text)); 
+      } 
+    }).then(arrayBuffer => ctx.decodeAudioData(arrayBuffer)).then(audio => { 
+      audioBuffer = audio; 
+      let player = ctx.createBufferSource(); 
+      player.buffer = audio; 
+      player.connect(ctx.destination); 
+      player.start(ctx.currentTime); 
+    }).catch(reason => { 
+      alert(reason); 
+    }).finally(() => { 
+      button.disabled = false; 
+    }); // 在最后添加以下代码 
+    let downloadButton = document.getElementById('downloadButton'); 
+    downloadButton.addEventListener('click', () => { 
+      if (audioBuffer) { 
+        const audioData = exportWav(audioBuffer); 
+        const blob = new Blob([audioData], { type: 'audio/wav' }); 
+        const url = URL.createObjectURL(blob); 
+        const a = document.createElement('a'); 
+        a.href = url; 
+        a.download = 'audio.wav'; 
+        document.body.appendChild(a); 
+        a.click(); 
+        document.body.removeChild(a); 
+      } else { alert('请先预览音频'); } 
+    }); 
+    function exportWav(buffer) { 
+      const numberOfChannels = buffer.numberOfChannels; 
+      const sampleRate = buffer.sampleRate; 
+      const length = buffer.length; 
+      const duration = length / sampleRate; 
+      const bufferData = []; 
+      for (let channel = 0; channel < numberOfChannels; channel++) { 
+        bufferData.push(buffer.getChannelData(channel)); 
+      } 
+      const interleaved = interleave(bufferData, numberOfChannels); 
+      const dataview = encodeWAV(interleaved, numberOfChannels, sampleRate); 
+      return dataview.buffer; 
+    } 
+    function interleave(input, numberOfChannels) { 
+      const length = input[0].length * numberOfChannels; 
+      const output = new Float32Array(length); 
+      let offset = 0; 
+      for (let i = 0; i < input[0].length; i++) { 
+        for (let channel = 0; channel < numberOfChannels; channel++) { 
+          output[offset] = input[channel][i]; offset++; 
+        } 
+      } 
+      return output; 
+    } 
+    function encodeWAV(samples, numberOfChannels, sampleRate) { 
+      const buffer = new ArrayBuffer(44 + samples.length * 2); 
+      const view = new DataView(buffer); 
+      writeString(view, 0, 'RIFF'); 
+      view.setUint32(4, 36 + samples.length * 2, true); 
+      writeString(view, 8, 'WAVE'); 
+      writeString(view, 12, 'fmt '); 
+      view.setUint32(16, 16, true); 
+      // Sub-chunk 1 size view.setUint16(20, 1, true); 
+      // Audio format (1 for PCM) view.setUint16(22, numberOfChannels, true); 
+      // Number of channels view.setUint32(24, sampleRate, true); 
+      // Sample rate view.setUint32(28, sampleRate * numberOfChannels * 2, true); 
+      // Byte rate view.setUint16(32, numberOfChannels * 2, true); 
+      // Block align view.setUint16(34, 16, true); 
+      // Bits per sample writeString(view, 36, 'data'); 
+      view.setUint32(40, samples.length * 2, true); 
+      floatTo16BitPCM(view, 44, samples); 
+      return view; 
+    } 
+    function writeString(view, offset, string) { 
+      for (let i = 0; i < string.length; i++) { 
+        view.setUint8(offset + i, string.charCodeAt(i)); 
+      } 
+    } 
+    function floatTo16BitPCM(output, offset, input) { 
+      for (let i = 0; i < input.length; i++, offset += 2) { 
+        const s = Math.max(-1, Math.min(1, input[i])); 
+        output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true); 
+      } 
+    }
+
+
+
+
+
+
+
+
+/*
     function preview() {
       let headers = { 'Content-Type': 'text/plain' };
       let voiceName = document.getElementsByName('voiceName')[0].value;
@@ -216,7 +331,7 @@
           button.disabled = false;
         });
     }
-
+*/
     function createLegadoUrl() {
       let name = document.getElementsByName('name')[0].value;
       let voiceName = document.getElementsByName('voiceName')[0].value;
