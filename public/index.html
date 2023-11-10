@@ -174,16 +174,7 @@
       return ssml;
     }
 
-
-
-
-
-
-
     function preview() {
-
-
-
       let headers = { 'Content-Type': 'text/plain' };
       let voiceName = document.getElementsByName('voiceName')[0].value;
       let voiceFormat = document.getElementsByName('voiceFormat')[0].value;
@@ -225,7 +216,6 @@
         .finally(() => {
           button.disabled = false;
         });
-    }
 // 在最后添加以下代码 
 let downloadButton = document.getElementById('downloadButton'); 
 downloadButton.addEventListener('click', () => { 
@@ -297,6 +287,10 @@ function floatTo16BitPCM(output, offset, input) {
 }
 
 
+    }
+
+
+    
     function createLegadoUrl() {
       let name = document.getElementsByName('name')[0].value;
       let voiceName = document.getElementsByName('voiceName')[0].value;
