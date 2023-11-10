@@ -91,8 +91,8 @@
         <div class="row">
           <div class="col">
             <button id="previewButton" type="button" class="btn btn-secondary" onclick="preview()">测试</button>
-            <button id="downloadButton" type="button" class="btn btn-secondary">下载</button>
-            <button type="button" class="btn btn-primary" onclick='createLegadoUrl()'>生成阅读（legado）语音引擎链接</button>
+            <button id="downloadButton" type="button" class="btn btn-primary">下载</button>
+            <button type="button" class="btn btn-primary" onclick='createLegadoUrl()'>生成阅读引擎链接</button>
           </div>
         </div>
     </form>
@@ -217,6 +217,9 @@
         .finally(() => {
           button.disabled = false;
         });
+    }
+
+
 // 在最后添加以下代码 
 let downloadButton = document.getElementById('downloadButton'); 
 downloadButton.addEventListener('click', () => { 
@@ -286,9 +289,6 @@ function floatTo16BitPCM(output, offset, input) {
     output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true); 
   } 
 }
-
-
-    }
 
 
     
