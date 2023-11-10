@@ -323,7 +323,51 @@ fetch('/api/ra', {
   alert(reason); 
 }).finally(() => { 
   button.disabled = false; 
-}); // 在最后添加以下代码 
+}); 
+
+/*
+      let headers = { 'Content-Type': 'text/plain' };
+      let voiceName = document.getElementsByName('voiceName')[0].value;
+      let voiceFormat = document.getElementsByName('voiceFormat')[0].value;
+      let token = document.getElementsByName('token')[0].value;
+      let previewText = document.getElementsByName('previewText')[0].value;
+      let ssml = createSSML(previewText, voiceName)
+      if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+      }
+
+      headers['Format'] = voiceFormat;
+
+      let button = document.getElementById('previewButton');
+      button.disabled = true;
+      let ctx = new AudioContext();
+      fetch('/api/ra', {
+        method: 'post',
+        headers: headers,
+        body: ssml
+      }).then(response => {
+        if (response.status == 200) {
+          return response.arrayBuffer()
+        } else if (response.status == 401) {
+          throw '无效的密钥';
+        } else {
+          return response.text().then(text => Promise.reject(text));
+        }
+      }).then(arrayBuffer => ctx.decodeAudioData(arrayBuffer))
+        .then(audio => {
+          let player = ctx.createBufferSource();
+          player.buffer = audio;
+          player.connect(ctx.destination);
+          player.start(ctx.currentTime);
+        })
+        .catch(reason => {
+          alert(reason);
+        })
+        .finally(() => {
+          button.disabled = false;
+        });*/
+    }
+// 在最后添加以下代码 
 let downloadButton = document.getElementById('downloadButton'); 
 downloadButton.addEventListener('click', () => { 
   if (audioBuffer) { 
@@ -393,50 +437,6 @@ function floatTo16BitPCM(output, offset, input) {
   } 
 }
 
-
-
-/*
-      let headers = { 'Content-Type': 'text/plain' };
-      let voiceName = document.getElementsByName('voiceName')[0].value;
-      let voiceFormat = document.getElementsByName('voiceFormat')[0].value;
-      let token = document.getElementsByName('token')[0].value;
-      let previewText = document.getElementsByName('previewText')[0].value;
-      let ssml = createSSML(previewText, voiceName)
-      if (token) {
-        headers['Authorization'] = 'Bearer ' + token;
-      }
-
-      headers['Format'] = voiceFormat;
-
-      let button = document.getElementById('previewButton');
-      button.disabled = true;
-      let ctx = new AudioContext();
-      fetch('/api/ra', {
-        method: 'post',
-        headers: headers,
-        body: ssml
-      }).then(response => {
-        if (response.status == 200) {
-          return response.arrayBuffer()
-        } else if (response.status == 401) {
-          throw '无效的密钥';
-        } else {
-          return response.text().then(text => Promise.reject(text));
-        }
-      }).then(arrayBuffer => ctx.decodeAudioData(arrayBuffer))
-        .then(audio => {
-          let player = ctx.createBufferSource();
-          player.buffer = audio;
-          player.connect(ctx.destination);
-          player.start(ctx.currentTime);
-        })
-        .catch(reason => {
-          alert(reason);
-        })
-        .finally(() => {
-          button.disabled = false;
-        });*/
-    }
 
     function createLegadoUrl() {
       let name = document.getElementsByName('name')[0].value;
