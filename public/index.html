@@ -217,27 +217,6 @@
         .finally(() => {
           button.disabled = false;
         });
-    }
-
-    function createLegadoUrl() {
-      let name = document.getElementsByName('name')[0].value;
-      let voiceName = document.getElementsByName('voiceName')[0].value;
-      let voiceFormat = document.getElementsByName('voiceFormat')[0].value;
-      let token = document.getElementsByName('token')[0].value;
-      let previewText = document.getElementsByName('previewText')[0].value;
-      let url = window.location.protocol + '//' + window.location.host + '/api/legado?api=' + encodeURIComponent(window.location.protocol + '//' + window.location.host + '/api/ra')
-        + '&name=' + encodeURIComponent(name)
-        + '&voiceName=' + encodeURIComponent(voiceName)
-        + '&voiceFormat=' + encodeURIComponent(voiceFormat)
-        + '&token=' + encodeURIComponent(token);
-      let svg = new QRCode(url).svg();
-      let modal = new bootstrap.Modal(document.getElementById('legadoUrlModal'))
-      modal.show();
-      document.getElementById('legadoUrlQRCode').innerHTML = svg;
-      document.getElementById('legadoUrl').value = url;
-      document.getElementById('legadoImportButton').href = 'legado://import/httpTTS?src=' + encodeURIComponent(url);
-    }
-
 // 在最后添加以下代码 
 let downloadButton = document.getElementById('downloadButton'); 
 downloadButton.addEventListener('click', () => { 
@@ -247,7 +226,7 @@ downloadButton.addEventListener('click', () => {
     const url = URL.createObjectURL(blob); 
     const a = document.createElement('a'); 
     a.href = url; 
-    a.download = 'audio.mp3'; 
+    a.download = 'audio.wav'; 
     document.body.appendChild(a); 
     a.click(); 
     document.body.removeChild(a); 
@@ -310,6 +289,27 @@ function floatTo16BitPCM(output, offset, input) {
 
 
     
+    }
+
+    function createLegadoUrl() {
+      let name = document.getElementsByName('name')[0].value;
+      let voiceName = document.getElementsByName('voiceName')[0].value;
+      let voiceFormat = document.getElementsByName('voiceFormat')[0].value;
+      let token = document.getElementsByName('token')[0].value;
+      let previewText = document.getElementsByName('previewText')[0].value;
+      let url = window.location.protocol + '//' + window.location.host + '/api/legado?api=' + encodeURIComponent(window.location.protocol + '//' + window.location.host + '/api/ra')
+        + '&name=' + encodeURIComponent(name)
+        + '&voiceName=' + encodeURIComponent(voiceName)
+        + '&voiceFormat=' + encodeURIComponent(voiceFormat)
+        + '&token=' + encodeURIComponent(token);
+      let svg = new QRCode(url).svg();
+      let modal = new bootstrap.Modal(document.getElementById('legadoUrlModal'))
+      modal.show();
+      document.getElementById('legadoUrlQRCode').innerHTML = svg;
+      document.getElementById('legadoUrl').value = url;
+      document.getElementById('legadoImportButton').href = 'legado://import/httpTTS?src=' + encodeURIComponent(url);
+    }
+
   </script>
 </body>
 
