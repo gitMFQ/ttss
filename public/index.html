@@ -84,14 +84,13 @@
         <div class="row">
           <div class="col">
             <label for="previewText" class="form-label">测试文本：</label>
-            <textarea name="previewText" class="form-control" rows="3" cols="">高端大气上档次，低调奢华有内涵。奔放洋气有深度，狂拽炫酷屌炸天。</textarea>
+            <textarea name="previewText" class="form-control" rows="3" cols="">高端大气上档次，低调奢华有内涵。</textarea>
           </div>
         </div>
         <div style="height:20px"></div>
         <div class="row">
           <div class="col">
             <button id="previewButton" type="button" class="btn btn-secondary" onclick="preview()">试听</button>
-            <button id="downloadButton" type="button" class="btn btn-primary">下载</button>
             <button type="button" class="btn btn-primary" onclick='createLegadoUrl()'>生成链接</button>
           </div>
         </div>
@@ -159,7 +158,7 @@
 
     function updateConfigName() {
       let voice = document.getElementsByName('voiceName')[0].value;
-      document.getElementsByName('name')[0].value = '大声朗读（' + voice + '）';
+      document.getElementsByName('name')[0].value = 'ttss（' + voice + '）';
     }
 
     function createSSML(text, voiceName) {
@@ -205,7 +204,6 @@
         }
       }).then(arrayBuffer => ctx.decodeAudioData(arrayBuffer))
         .then(audio => {
-          audioBuffer = audio; 
           let player = ctx.createBufferSource();
           player.buffer = audio;
           player.connect(ctx.destination);
@@ -217,78 +215,6 @@
         .finally(() => {
           button.disabled = false;
         });
-// 在最后添加以下代码 
-let downloadButton = document.getElementById('downloadButton'); 
-downloadButton.addEventListener('click', () => { 
-  if (audioBuffer) { 
-    const audioData = exportWav(audioBuffer); 
-    const blob = new Blob([audioData], { type: 'audio/wav' }); 
-    const url = URL.createObjectURL(blob); 
-    const a = document.createElement('a'); 
-    a.href = url; 
-    a.download = 'audio.wav'; 
-    document.body.appendChild(a); 
-    a.click(); 
-    document.body.removeChild(a); 
-  } else { alert('请先预览音频'); } 
-}); 
-function exportWav(buffer) { 
-  const numberOfChannels = buffer.numberOfChannels; 
-  const sampleRate = buffer.sampleRate; 
-  const length = buffer.length; 
-  const duration = length / sampleRate; 
-  const bufferData = []; 
-  for (let channel = 0; channel < numberOfChannels; channel++) { 
-    bufferData.push(buffer.getChannelData(channel)); 
-  } 
-  const interleaved = interleave(bufferData, numberOfChannels); 
-  const dataview = encodeWAV(interleaved, numberOfChannels, sampleRate); 
-  return dataview.buffer; 
-} 
-function interleave(input, numberOfChannels) { 
-  const length = input[0].length * numberOfChannels; 
-  const output = new Float32Array(length); 
-  let offset = 0; 
-  for (let i = 0; i < input[0].length; i++) { 
-    for (let channel = 0; channel < numberOfChannels; channel++) { 
-      output[offset] = input[channel][i]; offset++; 
-    } 
-  } 
-  return output; 
-} 
-function encodeWAV(samples, numberOfChannels, sampleRate) { 
-  const buffer = new ArrayBuffer(44 + samples.length * 2); 
-  const view = new DataView(buffer); 
-  writeString(view, 0, 'RIFF'); 
-  view.setUint32(4, 36 + samples.length * 2, true); 
-  writeString(view, 8, 'WAVE'); 
-  writeString(view, 12, 'fmt '); 
-  view.setUint32(16, 16, true); 
-  // Sub-chunk 1 size view.setUint16(20, 1, true); 
-  // Audio format (1 for PCM) view.setUint16(22, numberOfChannels, true); 
-  // Number of channels view.setUint32(24, sampleRate, true); 
-  // Sample rate view.setUint32(28, sampleRate * numberOfChannels * 2, true); 
-  // Byte rate view.setUint16(32, numberOfChannels * 2, true); 
-  // Block align view.setUint16(34, 16, true); 
-  // Bits per sample writeString(view, 36, 'data'); 
-  view.setUint32(40, samples.length * 2, true); 
-  floatTo16BitPCM(view, 44, samples); 
-  return view; 
-} 
-function writeString(view, offset, string) { 
-  for (let i = 0; i < string.length; i++) { 
-    view.setUint8(offset + i, string.charCodeAt(i)); 
-  } 
-} 
-function floatTo16BitPCM(output, offset, input) { 
-  for (let i = 0; i < input.length; i++, offset += 2) { 
-    const s = Math.max(-1, Math.min(1, input[i])); 
-    output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true); 
-  } 
-}
-
-
-    
     }
 
     function createLegadoUrl() {
