@@ -3,7 +3,7 @@ import axios from 'axios'
 import { createHash } from 'node:crypto'
 import { WebSocket } from 'ws'
 
-export const CHROMIUM_FULL_VERSION = '144.0.3719.82'
+export const CHROMIUM_FULL_VERSION = '146.0.3803.0'
 export const TRUSTED_CLIENT_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4'
 const WINDOWS_FILE_TIME_EPOCH = 11644473600n
 
@@ -114,7 +114,7 @@ export class EdgeTTSClient {
             origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
             headers: {
                 'User-Agent':
-                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0',
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 26_2_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0',
             },
         })
         return new Promise((resolve, reject) => {
