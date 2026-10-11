@@ -39,7 +39,7 @@ export async function textToSpeach(text: string, options: TTSOptions) {
         const base64Audio = Buffer.from(data.audio).toString('base64')
         return base64Audio
     } catch (error) {
-        console.log('textToSpeach error', error)
+        console.error('textToSpeach error', error)
         throw error
     }
 }

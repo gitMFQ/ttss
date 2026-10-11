@@ -57,8 +57,8 @@ export async function GET(request: Request) {
         const audioBlob = new Blob([speech.audio], { type: 'audio/mpeg' });
         return new Response(audioBlob, { status: 200, headers: { 'Content-Type': 'audio/mpeg' } })
     } catch (error) {
-        console.log('textToSpeach error', error)
-        console.log("Full stack", (error as Error).stack)
+        console.error('textToSpeach error', error)
+        console.error("Full stack", (error as Error).stack)
         return new Response(JSON.stringify({ error: (error as Error).message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 }
