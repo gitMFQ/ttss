@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.gitignore
+.yarn/install-state.gz
+.yarn/cache
+.github
+Dockerfile
+.dockerignore
+README.md
+*.log
+npm-debug.log*
+.DS_Store
+.idea
+.vscode

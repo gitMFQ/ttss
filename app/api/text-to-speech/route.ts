@@ -1,5 +1,9 @@
 import { EdgeTTSService } from "@/service/edge-tts-service"
 import { TTSOptions } from "@/service/tts-service"
+
+// 该路由依赖请求头/查询参数，声明为纯动态路由，避免构建期静态预渲染尝试
+export const dynamic = "force-dynamic"
+
 Error.stackTraceLimit = Infinity;
 export async function GET(request: Request) {
     try {

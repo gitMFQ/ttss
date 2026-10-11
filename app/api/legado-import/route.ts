@@ -1,3 +1,6 @@
+// 该路由依赖请求头（host），标记为纯动态路由，避免构建期静态预渲染尝试
+export const dynamic = "force-dynamic"
+
 export async function GET(request: Request) {
     try {
         const requiredToken = process.env.MS_RA_FORWARDER_TOKEN || process.env.TOKEN
