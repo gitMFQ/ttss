@@ -69,15 +69,20 @@ export interface ClientOptions {
     wordBoundaryEnabled?: boolean
 }
 
+export interface VoiceMetadata {
+    // Edge TTS metadata 结构为动态对象，此处用宽松类型承载
+    [key: string]: unknown
+}
+
 export interface ConvertResult {
     audio: ArrayBuffer
-    metadata: any[]
+    metadata: VoiceMetadata[]
 }
 
 export class EdgeTTSClient {
     private constructor() {
     }
-    public static async voices(): Promise<any> {
+    public static async voices(): Promise<unknown> {
         const url = 'https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4'
         const response = await axios.get(url)
         const data = response.data
@@ -96,7 +101,7 @@ export class EdgeTTSClient {
         return hash.digest('hex').toUpperCase()
     }
 
-    private static generateId(): String {
+    private static generateId(): string {
         const charset = "abcdef0123456789";
         let randomString = "";
         for (let i = 0; i < 32; i++) { // 16字节 * 2字符/字节 = 32字符
@@ -108,7 +113,7 @@ export class EdgeTTSClient {
     private static async createWS(): Promise<WebSocket> {
         const connectionId = this.generateId()
         const secMsGec = this.generateSecMsGecToken()
-        let url = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=1-${CHROMIUM_FULL_VERSION}&ConnectionId=${connectionId}`
+        const url = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=1-${CHROMIUM_FULL_VERSION}&ConnectionId=${connectionId}`
         const client = new WebSocket(url, {
             host: 'speech.platform.bing.com',
             origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
@@ -132,10 +137,10 @@ export class EdgeTTSClient {
 
     public static async convert(ssml: string, options: ClientOptions): Promise<ConvertResult> {
         console.debug('start convert', JSON.stringify(ssml), JSON.stringify(options))
-        let convertResult = new Promise<ConvertResult>(async (resolve, reject) => {
+        const convertResult = new Promise<ConvertResult>(async (resolve, reject) => {
             try {
                 let audio = new ArrayBuffer(0)
-                let metadata: any = []
+                const metadata: VoiceMetadata[] = []
                 const requestId = this.generateId()
                 const ws = await this.createWS()
                 ws.onclose = (r) => {
@@ -156,12 +161,12 @@ export class EdgeTTSClient {
                     }
                     console.debug(`Received ${typeName} message`,)
                     if (message.data instanceof Buffer) {
-                        let messageData = new Uint8Array(message.data).buffer
+                        const messageData = new Uint8Array(message.data).buffer
                         const headerRangeByteCount = 2
-                        let [headerStart, headerLength] = Array.from(new Uint8Array(messageData.slice(0, 2)))
+                        const [headerStart, headerLength] = Array.from(new Uint8Array(messageData.slice(0, 2)))
                         const headerData = messageData.slice(headerStart, headerRangeByteCount + headerLength)
                         const headerPayload = headerData.slice(headerRangeByteCount, headerData.byteLength)
-                        let headerString = arrayBufferToString(headerPayload)
+                        const headerString = arrayBufferToString(headerPayload)
                         const header = MessageHeader.parse(headerString)
                         const data = messageData.slice(headerLength + headerRangeByteCount)
                         console.debug('Received binary data:', header.requestId, 'StreamId:', header.streamId, 'Path:', header.path, 'Length:', data.byteLength)
@@ -202,8 +207,8 @@ export class EdgeTTSClient {
                     }
                 }
                 // 发送配置消息
-                let config = createConfigMessage(options)
-                let configMessage =
+                const config = createConfigMessage(options)
+                const configMessage =
                     `X-Timestamp:${Date()}\r\n` +
                     'Content-Type:application/json; charset=utf-8\r\n' +
                     'Path:speech.config\r\n\r\n' +
@@ -217,7 +222,7 @@ export class EdgeTTSClient {
                             reject(error)
                         } else {
                             // 发送SSML消息
-                            let ssmlMessage =
+                            const ssmlMessage =
                                 `X-Timestamp:${Date()}\r\n` +
                                 `X-RequestId:${requestId}\r\n` +
                                 `Content-Type:application/ssml+xml\r\n` +
