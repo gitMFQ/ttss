@@ -17,7 +17,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
 import axios from "axios"
 import clsx from "clsx"
-import { Check, ChevronsUpDown, LoaderCircle, Smile, Speech, QrCode, Globe, Copy } from "lucide-react"
+import { Check, ChevronsUpDown, LoaderCircle, Smile, Speech, QrCode, Globe, Copy, Server } from "lucide-react"
 import { HTMLAttributes, useMemo, useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { v4 as uuidv4 } from 'uuid'
@@ -29,8 +29,55 @@ import QRCode from 'qrcode'
 
 const TTSRequestSchame = z.object({
     options: TTSOptionsSchema,
-    text: z.string()
+    text: z.string(),
+    service: z.enum(['edge', 'ms']).default('edge')
 })
+
+// 服务通道选项
+const serviceOptions = [
+    { value: 'edge', label: 'Edge 大声朗读', hint: '免费，不支持讲话风格' },
+    { value: 'ms', label: '微软翻译', hint: '免费，支持讲话风格' },
+] as const
+
+const msRegions = [
+    { value: 'auto', label: '自动（令牌区域）' }, { value: 'hd', label: '高清区域（HD）' },
+    { value: 'eastasia', label: '东亚' }, { value: 'southeastasia', label: '东南亚' },
+    { value: 'northeurope', label: '北欧' }, { value: 'westeurope', label: '西欧' },
+    { value: 'westus', label: '美国西部' }, { value: 'eastus', label: '美国东部' },
+] as const
+
+const msOutputFormats = [
+    'audio-16khz-32kbitrate-mono-mp3', 'audio-16khz-64kbitrate-mono-mp3', 'audio-16khz-128kbitrate-mono-mp3',
+    'audio-24khz-48kbitrate-mono-mp3', 'audio-24khz-96kbitrate-mono-mp3', 'audio-24khz-160kbitrate-mono-mp3',
+    'audio-48khz-96kbitrate-mono-mp3', 'audio-48khz-192kbitrate-mono-mp3',
+    'webm-16khz-16bit-mono-opus', 'webm-24khz-16bit-mono-opus', 'webm-24khz-16bit-24kbps-mono-opus',
+    'ogg-16khz-16bit-mono-opus', 'ogg-24khz-16bit-mono-opus', 'ogg-48khz-16bit-mono-opus', 'amr-wb-16000hz',
+    'riff-8khz-8bit-mono-alaw', 'riff-8khz-8bit-mono-mulaw', 'riff-8khz-16bit-mono-pcm',
+    'riff-16khz-16bit-mono-pcm', 'riff-22050hz-16bit-mono-pcm', 'riff-24khz-16bit-mono-pcm',
+    'riff-44100hz-16bit-mono-pcm', 'riff-48khz-16bit-mono-pcm',
+] as const
+
+const omniLocales = ['zh-CN', 'zh-HK', 'zh-TW', 'en-US', 'en-GB', 'ja-JP', 'ko-KR', 'fr-FR', 'de-DE', 'es-ES', 'it-IT', 'pt-BR', 'ru-RU']
+
+function formatLabel(format: string): string {
+    return format.replace(/^audio-/, '').replace(/-mono-/, ' / ').replace(/-/g, ' ')
+}
+
+const msStyleNames: Record<string, string> = {
+    general: '默认', cheerful: '愉快', excited: '兴奋', hopeful: '充满希望',
+    calm: '平静', gentle: '温柔', affectionate: '亲昵', chat: '聊天',
+    serious: '严肃', lyrical: '抒情', sad: '悲伤', angry: '愤怒',
+    fearful: '恐惧', terrified: '惊恐', surprised: '惊讶',
+    disgruntled: '不满', unfriendly: '冷淡', whispering: '耳语',
+    'narration-relaxed': '轻松旁白', 'customer-service': '客服',
+    'voice-assistant': '语音助手', comforting: '安慰',
+}
+
+function personalityLabel(value: string, service: string): string {
+    return service === 'ms'
+        ? (msStyleNames[value.toLowerCase()] ?? value)
+        : getFirendlyPersonalityName(value)
+}
 
 export interface TTSWorkspaceProps extends Omit<HTMLAttributes<HTMLDivElement>, 'children'> {
     options?: TTSOptions
@@ -48,7 +95,40 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
 
 
 
-    const voicesQuery = useVoices() // 查询所有发音人列表，不使用selectedLocale过滤
+    const form = useForm<z.infer<typeof TTSRequestSchame>>({
+        resolver: zodResolver(TTSRequestSchame),
+        defaultValues: {
+            options: {
+                voice: 'Microsoft Server Speech Text to Speech Voice (zh-CN, XiaoxiaoNeural)',
+                safeMode: true,
+                omni: false,
+                region: 'auto',
+                format: 'audio-24khz-160kbitrate-mono-mp3',
+                styleDegree: 1,
+            },
+            text: '君不见黄河之水天上来，奔流到海不复回。',
+            service: 'edge'
+        }
+    })
+
+    const selectedService = form.watch('service') ?? 'edge'
+    const watchedFormValues = form.watch()
+    const voicesQuery = useVoices('', selectedService) // 根据通道加载音色列表
+
+    // 切换通道时，若当前发音人在新通道不存在则重置为该地区的第一个
+    useEffect(() => {
+        const subscription = form.watch((_, { name }) => {
+            if (name === 'service') {
+                setSelectedLocale('')
+                form.setValue('options.voice', '')
+                form.setValue('options.personality', undefined)
+                form.setValue('options.role', undefined)
+                form.setValue('options.langSkill', undefined)
+                form.setValue('options.omni', false)
+            }
+        })
+        return () => subscription.unsubscribe()
+    }, [form])
 
     // 从voicesQuery中提取所有可用的locales
     const availableLocales = useMemo(() => {
@@ -62,16 +142,6 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
         if (!voicesQuery.data || !selectedLocale) return []
         return voicesQuery.data.filter(voice => voice.locale === selectedLocale)
     }, [voicesQuery.data, selectedLocale])
-
-    const form = useForm<z.infer<typeof TTSRequestSchame>>({
-        resolver: zodResolver(TTSRequestSchame),
-        defaultValues: {
-            options: {
-                voice: 'Microsoft Server Speech Text to Speech Voice (zh-CN, XiaoxiaoNeural)',
-            },
-            text: '君不见黄河之水天上来，奔流到海不复回。'
-        }
-    })
 
     // 设置默认选择中国大陆
     useEffect(() => {
@@ -95,7 +165,39 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
     }, [selectedLocale, currentLocaleVoices, form])
 
 
-    const currentVoice = useVoice(form.getValues('options.voice'))
+    const selectedVoice = form.watch('options.voice')
+    const currentVoice = useVoice(selectedVoice, selectedService)
+    const selectedSafeMode = form.watch('options.safeMode') ?? true
+    const selectedOmni = form.watch('options.omni') ?? false
+    const selectedPersonality = form.watch('options.personality')
+    const languageSkillChoices = useMemo(() => {
+        if (selectedService !== 'ms' || !currentVoice) return []
+        if (selectedOmni) {
+            const locales = [...new Set([currentVoice.locale, ...omniLocales, ...(voicesQuery.data ?? []).map(voice => voice.locale)])]
+            return locales.map(value => ({ value, label: getLocaleFriendlyName(value) }))
+        }
+        const secondary = currentVoice.secondaryLocales ?? []
+        return secondary.length
+            ? [...new Set([currentVoice.locale, ...secondary])].map(value => ({ value, label: getLocaleFriendlyName(value) }))
+            : []
+    }, [selectedService, currentVoice, selectedOmni, voicesQuery.data])
+
+    useEffect(() => {
+        if (selectedService !== 'ms' || !currentVoice) return
+        if (!currentVoice.omniCapable && form.getValues('options.omni')) {
+            form.setValue('options.omni', false)
+        }
+        const selectedRole = form.getValues('options.role')
+        if (selectedRole && selectedRole !== 'default' && !currentVoice.roles?.includes(selectedRole)) {
+            form.setValue('options.role', undefined)
+        }
+        const selectedLanguage = form.getValues('options.langSkill')
+        if (selectedLanguage && !languageSkillChoices.some(item => item.value === selectedLanguage)) {
+            form.setValue('options.langSkill', undefined)
+        } else if (!selectedLanguage && languageSkillChoices.length > 0) {
+            form.setValue('options.langSkill', languageSkillChoices[0].value)
+        }
+    }, [selectedService, currentVoice, languageSkillChoices, form])
 
     const onSubmit = form.handleSubmit(async data => {
         try {
@@ -120,6 +222,7 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                 responseType: 'blob',
                 params: {
                     ...data.options,
+                    service: data.service,
                     text: data.text
                 },
                 headers
@@ -135,6 +238,7 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                 id: uuidv4(),
                 createAt: Date.now(),
                 text: data.text,
+                service: data.service,
                 options: data.options,
                 uri: audioUri
             })
@@ -149,23 +253,20 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
     })
 
     const legadoApiLink = useMemo(() => {
-        const values = form.getValues()
-        if (!values || typeof window === 'undefined') {
-            return ''
-        }
+        const values = watchedFormValues
+        if (!values || typeof window === 'undefined') return ''
         const protocol = window.location.protocol.replace(":", "")
         const host = window.location.host
-        let queryString = Object.entries(values.options)
-            .filter(([, value]) => value != null && value != undefined)
-            .map(([key, value]) => `${key}=${value}`).join('&')
-        queryString += `&protocol=${protocol}`
+        const params = new URLSearchParams()
+        Object.entries(values.options).forEach(([key, value]) => {
+            if (value != null && value !== '') params.set(key, String(value))
+        })
+        params.set('service', values.service)
+        params.set('protocol', protocol)
         const token = getToken()
-        if (token) {
-            queryString += `&token=${token}`
-        }
-        const apiUrl = `${protocol}://${host}/api/legado-import?${queryString}`
-        return apiUrl
-    }, [form.getValues()])
+        if (token) params.set('token', token)
+        return `${protocol}://${host}/api/legado-import?${params.toString()}`
+    }, [watchedFormValues, getToken])
 
     const legadoImportLink = useMemo(() => {
         return `legado://import/httpTTS?src=${encodeURIComponent(legadoApiLink)}`
@@ -208,6 +309,61 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                         'grid grid-cols-1 place-content-start gap-2',
                         'md:w-80 md:grid-cols-[repeat(1,minmax(10rem,1fr))]'
                     )}>
+                        {/* 服务通道选择器 */}
+                        <FormField name='service' control={form.control}
+                            render={({ field }) => (
+                                <FormItem>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                role="combobox"
+                                                className="justify-between w-full"
+                                            >
+                                                <span className={clsx('flex justify-between items-center gap-1 text-sm opacity-50 w-16 truncate')}><Server className="h-4 w-4" />通道</span>
+                                                <span className={clsx('ml-2 flex-1 text-left truncate')}>
+                                                    {serviceOptions.find(s => s.value === field.value)?.label ?? "选择通道..."}
+                                                </span>
+                                                <ChevronsUpDown className="opacity-50" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="p-0 w-[--radix-popover-trigger-width]">
+                                            <Command>
+                                                <CommandList>
+                                                    <CommandGroup>
+                                                        {serviceOptions.map((option) => (
+                                                            <PopoverPrimitive.Close asChild key={option.value}>
+                                                                <div>
+                                                                    <CommandItem
+                                                                        value={option.value}
+                                                                        onSelect={() => {
+                                                                            field.onChange(option.value)
+                                                                        }}
+                                                                    >
+                                                                        <div className="flex flex-col">
+                                                                            <span>{option.label}</span>
+                                                                            <span className="text-xs text-muted-foreground">{option.hint}</span>
+                                                                        </div>
+                                                                        <Check
+                                                                            className={clsx(
+                                                                                "ml-auto",
+                                                                                field.value === option.value ? "opacity-100" : "opacity-0"
+                                                                            )}
+                                                                        />
+                                                                    </CommandItem>
+                                                                </div>
+                                                            </PopoverPrimitive.Close>
+                                                        ))}
+                                                    </CommandGroup>
+                                                </CommandList>
+                                            </Command>
+                                        </PopoverContent>
+                                    </Popover>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        ></FormField>
+
                         {/* 地区选择器 */}
                         <div>
                             <Popover>
@@ -298,7 +454,7 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                                                 <span className={clsx('flex justify-between items-center gap-1 text-sm opacity-50 w-16 truncate')}><Speech className="h-4 w-4" />发音人</span>
                                                 <span className={clsx('ml-2 flex-1 text-left truncate')}>
                                                     {field.value
-                                                        ? getFriendlyVoiceName(field.value, field.value)
+                                                        ? getFriendlyVoiceName(field.value, currentVoice?.label ?? field.value)
                                                         : "选择发音人..."}
                                                 </span>
                                                 <ChevronsUpDown className="opacity-50" />
@@ -345,7 +501,64 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                                 </FormItem>
                             )}
                         ></FormField>
-                        <FormField name='options.personality' control={form.control}
+                        {selectedService === 'ms' && <>
+                            <FormField name='options.safeMode' control={form.control}
+                                render={({ field }) => (
+                                    <FormItem className="rounded-md border p-3">
+                                        <label className="flex items-center gap-2 text-sm">
+                                            <input type="checkbox" checked={field.value ?? true} onChange={event => field.onChange(event.target.checked)} />
+                                            <span>有声书稳定模式</span>
+                                        </label>
+                                        <p className="mt-1 text-xs text-muted-foreground">固定 24k/160k MP3；限制语速、音调和音量，避免异常发音。</p>
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField name='options.omni' control={form.control}
+                                render={({ field }) => (
+                                    <FormItem className="rounded-md border p-3">
+                                        <label className={clsx("flex items-center gap-2 text-sm", !currentVoice?.omniCapable && "opacity-50")}>
+                                            <input type="checkbox" checked={Boolean(field.value)} disabled={!currentVoice?.omniCapable} onChange={event => field.onChange(event.target.checked)} />
+                                            <span>全场景音色 (Omni)</span>
+                                        </label>
+                                        <p className="mt-1 text-xs text-muted-foreground">仅支持普通 Neural 音色；自动使用 Dragon HD Omni 并避免不稳定格式。</p>
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField name='options.region' control={form.control}
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <Label>微软 TTS 区域</Label>
+                                        <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={field.value || 'auto'} onChange={field.onChange}>
+                                            {msRegions.map(region => <option key={region.value} value={region.value}>{region.label}</option>)}
+                                        </select>
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField name='options.format' control={form.control}
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <Label>输出格式</Label>
+                                        <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={field.value || 'audio-24khz-160kbitrate-mono-mp3'} onChange={field.onChange} disabled={selectedSafeMode}>
+                                            {msOutputFormats.map(format => <option key={format} value={format}>{formatLabel(format)}</option>)}
+                                        </select>
+                                        {selectedSafeMode && <p className="text-xs text-muted-foreground">稳定模式固定为 24kHz / 160k MP3。</p>}
+                                    </FormItem>
+                                )}
+                            />
+                            {languageSkillChoices.length > 0 && <FormField name='options.langSkill' control={form.control}
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <Label>语言技能 (langSkill)</Label>
+                                        <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={field.value || ''} onChange={event => field.onChange(event.target.value || undefined)}>
+                                            <option value="">默认音色语言</option>
+                                            {languageSkillChoices.map(item => <option key={item.value} value={item.value}>{item.label} ({item.value})</option>)}
+                                        </select>
+                                    </FormItem>
+                                )}
+                            />}
+                        </>}
+
+                        {(selectedService !== 'ms' || (!selectedSafeMode && !selectedOmni)) && <FormField name='options.personality' control={form.control}
                             render={({ field }) => (
                                 <FormItem>
                                     <Popover>
@@ -358,7 +571,7 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                                                 <span className={clsx('flex justify-between items-center gap-1 text-sm opacity-50 w-16 truncate')}><Smile className="h-4 w-4" />风格</span>
                                                 <span className={clsx('ml-2 flex-1 text-left truncate')}>
                                                     {field.value
-                                                        ? getFirendlyPersonalityName(field.value)
+                                                        ? personalityLabel(field.value, selectedService)
                                                         : "默认"}
                                                 </span>
                                                 <ChevronsUpDown className="opacity-50" />
@@ -394,6 +607,12 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                                                                 </CommandItem>
                                                             </div>
                                                         </PopoverPrimitive.Close>
+                                                        {selectedService === 'ms' && !selectedSafeMode && <PopoverPrimitive.Close asChild>
+                                                            <div><CommandItem value="auto" onSelect={() => field.onChange('auto')}>
+                                                                自动风格（按规则/情绪桥接）
+                                                                <Check className={clsx("ml-auto", field.value === 'auto' ? "opacity-100" : "opacity-0")} />
+                                                            </CommandItem></div>
+                                                        </PopoverPrimitive.Close>}
                                                         {currentVoice?.personalities.map((personality) => (
                                                             <PopoverPrimitive.Close asChild
                                                                 key={personality}
@@ -405,7 +624,7 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                                                                             field.onChange(value)
                                                                         }}
                                                                     >
-                                                                        {getFirendlyPersonalityName(personality)}
+                                                                        {personalityLabel(personality, selectedService)}
                                                                         <Check
                                                                             className={clsx(
                                                                                 "ml-auto",
@@ -424,7 +643,35 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                                     <FormMessage />
                                 </FormItem>
                             )}
-                        ></FormField>
+                        ></FormField>}
+                        {selectedService === 'ms' && !selectedSafeMode && selectedPersonality === 'auto' && <FormField name='options.autoStyleRules' control={form.control}
+                            render={({ field }) => (
+                                <FormItem>
+                                    <Label>自动风格规则</Label>
+                                    <Textarea className="min-h-20" placeholder={'cheerful[开心|哈哈]\nsad[难过|悲伤]\nangry[愤怒|滚]'} value={field.value ?? ''} onChange={field.onChange} />
+                                    <p className="text-xs text-muted-foreground">每行格式：style[关键词|关键词]；匹配正文后自动选择对应风格。</p>
+                                </FormItem>
+                            )}
+                        />}
+                        {selectedService === 'ms' && !selectedSafeMode && !selectedOmni && (currentVoice?.roles?.length ?? 0) > 0 && <FormField name='options.role' control={form.control}
+                            render={({ field }) => (
+                                <FormItem>
+                                    <Label>角色 (role)</Label>
+                                    <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={field.value || 'default'} onChange={event => field.onChange(event.target.value === 'default' ? undefined : event.target.value)}>
+                                        <option value="default">默认角色</option>
+                                        {currentVoice?.roles?.map(role => <option key={role} value={role}>{role}</option>)}
+                                    </select>
+                                </FormItem>
+                            )}
+                        />}
+                        {selectedService === 'ms' && !selectedSafeMode && !selectedOmni && <FormField name='options.styleDegree' control={form.control}
+                            render={({ field }) => (
+                                <FormItem>
+                                    <Label>风格强度 (styleDegree)：{(field.value ?? 1).toFixed(1)}</Label>
+                                    <input className="w-full" type="range" min="0" max="2" step="0.1" value={field.value ?? 1} onChange={event => field.onChange(Number(event.target.value))} />
+                                </FormItem>
+                            )}
+                        />}
                         <div className={clsx('space-y-1')}>
                             <Label className={clsx('flex justify-between items-center gap-1 text-sm opacity-50 w-16 truncate')}>语速</Label>
                             <FormField name="options.rate" control={form.control} render={({ field }) => (

@@ -55,7 +55,7 @@ export default function TTSHistory({ ...props }: TTSHistoryProps) {
                         </CardContent>
                         <CardFooter className="w-full max-w-full mt-2 flex flex-col md:flex-row xl:flex-col justify-between gap-1 overflow-hidden">
                             <span className={clsx('text-[0.5rem] truncate flex-1 opacity-50 min-w-0')}>
-                                {record.options.voice}
+                                {record.service === 'ms' ? '微软翻译 · ' : 'Edge · '}{record.options.voice}
                             </span>
                             <span className={clsx('text-[0.5rem] truncate flex-1 text-right opacity-50 min-w-0')}>
                                 {dayjs(record.createAt).format('YYYY-MM-DD HH:mm:ss')}

@@ -5,6 +5,7 @@
 ## 功能特性
 
 - ✅ 支持 Microsoft Edge 浏览器“大声朗读”TTS 接口
+- ✅ 支持微软翻译免费通道（`service=ms`），无需 Azure 订阅密钥，且支持讲话风格（personality）
 - ✅ 提供简洁的 Web 界面，支持文本输入、参数调节和历史记录
 - ✅ 提供 RESTful API 接口，便于集成到第三方应用
 - ✅ 支持 Token 认证（可选），防止滥用
@@ -100,11 +101,13 @@ tmux kill-session -t ttss
 
 访问 `http://your-server:3000`，你可以：
 
-1. 在文本框中输入要转换的文本
-2. 选择语言、音色，调节语速、音调、音量
-3. 点击“生成”试听语音
-4. 生成历史记录会保存在侧边栏
-5. 可直接点击“导入到阅读”将服务配置到阅读（legado）App
+1. 选择“Edge 大声朗读”或“微软翻译”服务通道
+2. 在文本框中输入要转换的文本
+3. 选择语言、音色；微软翻译通道可配置区域、输出格式、稳定模式、风格/角色/强度、语言技能和 Omni
+4. 可关闭稳定模式以启用手动风格、角色和输出格式；自动风格支持关键词规则及情绪桥接标签
+5. 调节语速、音调、音量，点击“转换”试听语音
+6. 生成历史记录会保存在侧边栏
+7. 可直接点击“导入到阅读”将当前通道配置到阅读（legado）App
 
 ### API 调用
 
@@ -116,21 +119,46 @@ tmux kill-session -t ttss
 |------|------|------|--------|------|
 | text | string | 是 | - | 要转换的文本 |
 | voice | string | 是 | - | 音色名称，如 `zh-CN-XiaoxiaoNeural` |
-| volume | number | 否 | 0 | 音量，范围 -100 到 100 |
+| volume | number | 否 | UI/MS：0；Edge 旧 API：100 | 音量，范围 -100 到 100；UI 的 0 表示默认音量 |
 | rate | number | 否 | 0 | 语速，范围 -100 到 100 |
 | pitch | number | 否 | 0 | 音调，范围 -100 到 100 |
-| personality | string | 否 | - | 说话风格（可选） |
+| personality / style | string | 否 | - | 讲话风格；`style` 是参考插件兼容别名 |
+| role | string | 否 | default | 角色（依音色 `RolePlayList`） |
+| styleDegree | number | 否 | 1 | 风格强度，0–2 |
+| region | string | 否 | auto | `auto`、`hd`、eastasia、southeastasia、northeurope、westeurope、westus、eastus |
+| format | string | 否 | 24k/160k MP3 | 微软 TTS 输出格式；支持 MP3、Opus、AMR、PCM/WAV |
+| langSkill | string | 否 | 音色默认语言 | 多语言/Omni 音色的语言技能，如 `en-US` |
+| omni | boolean | 否 | false | 普通 Neural 音色转为 Dragon HD Omni（仅支持的音色生效） |
+| safeMode / msSafeMode | boolean | 否 | true | 稳定模式：固定 24k/160k MP3、收敛 prosody、使用默认 style/role |
+| autoStyleRules / as | string | 否 | - | 自动风格规则，每行 `style[关键词|关键词]` |
+| service | string | 否 | edge | TTS 通道：`edge` 或 `ms`（微软翻译免费通道） |
+
+**关于 `service=ms`（微软翻译免费通道）**：
+
+- 通过微软翻译 App 接口换取短时 Azure TTS 令牌并自动缓存/刷新，**无需 Azure 订阅密钥**。
+- UI 音色来自微软 voices/list 元数据，可按音色显示 `StyleList`、`RolePlayList`、`SecondaryLocaleList`；支持讲话风格、角色、风格强度、语言技能和 Omni。
+- 稳定模式与桥接清理：清除 `[[emo:...]]`、`[[ms_style:...]]`、`[[mimo_ctx:...]]` 等内部标记，并可从情绪标签/行首提示选择该音色支持的风格；不会朗读控制标签。
+- 支持 23 种微软输出格式。稳定模式固定 MP3；关闭稳定模式后才应用所选格式。Omni 会将易出问题的 Opus/AMR/48k 等格式回退至稳定 MP3。
+- `region=auto` 使用令牌返回区域；`hd` 与 Omni 按参考插件规则映射。只允许官方区域枚举，不开放任意代理主机，以避免 SSRF。
+- 该通道依赖微软翻译 App 接口，不保证长期可用；Edge 仍为默认通道。音色使用微软短名，如 `zh-CN-XiaoxiaoNeural`。
+
 **示例请求**:
 
 ```bash
 curl "http://localhost:3000/api/text-to-speech?voice=Microsoft+Server+Speech+Text+to+Speech+Voice+(zh-CN,+XiaoxiaoNeural)&volume=0&rate=0&pitch=0&text=你好"
+
+# 微软翻译免费通道 + 讲话风格
+curl "http://localhost:3000/api/text-to-speech?voice=zh-CN-XiaoxiaoNeural&service=ms&safeMode=false&style=cheerful&role=default&styleDegree=1.2&text=你好"
+
+# 关闭稳定模式并使用音色情绪桥接标签（控制标签不会被朗读）
+curl "http://localhost:3000/api/text-to-speech?voice=zh-CN-XiaoxiaoNeural&service=ms&safeMode=false&text=%5B%5Bemo%3Aangry%5D%5D%E5%88%AB%E8%BF%87%E6%9D%A5%EF%BC%81"
 ```
 
-**成功响应**: 返回音频文件（`audio/mpeg`）。
+**成功响应**: 返回音频文件；`Content-Type` 随所选格式返回 `audio/mpeg`、`audio/ogg`、`audio/webm`、`audio/wav` 或 `audio/amr`。稳定模式下固定为 `audio/mpeg`。
 
 **错误响应**:
 
-- `400 Bad Request`: 缺少必需参数
+- `400 Bad Request`: 缺少必需参数、数值越界或通道/区域/格式无效
 - `401 Unauthorized`: Token 无效（如果启用了认证）
 - `500 Internal Server Error`: 服务器内部错误
 
@@ -297,6 +325,9 @@ export default nextConfig;
 
 ## 重要更新历史
 
+### 本次更新
+- ✨ 新增微软翻译免费通道（`service=ms`）：无需 Azure 订阅密钥，`personality` 讲话风格真正生效（映射为 `mstts:express-as`），令牌自动缓存与刷新。
+
 ### 2025-08-20
 - ✅ 使用 **Next.js** 重构项目，修复了无法合成语音的问题。
 - ⚠️ **部署时请删除原项目后重新部署**，旧版本不再兼容。
@@ -324,7 +355,7 @@ export default nextConfig;
 
 ## 注意事项
 
-- ⚠️ 本项目使用的是 Edge 浏览器的“大声朗读”接口，**不保证后续可用性和稳定性**，请勿用于关键业务。
+- ⚠️ 本项目使用的是 Edge 浏览器的“大声朗读”接口与微软翻译免费通道，**不保证后续可用性和稳定性**，请勿用于关键业务。
 - ⚠️ **本项目仅供学习和参考，请勿商用。**
 - 💡 如果免费额度满足需求，建议支持 [Azure 官方 TTS 服务](https://azure.microsoft.com/products/ai-services/text-to-speech)。
 - 💡 如果只需要为固定文本生成语音，可使用 [有声内容创作](https://speech.microsoft.com/audiocontentcreation)（功能更丰富）。

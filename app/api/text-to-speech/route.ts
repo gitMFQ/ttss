@@ -1,64 +1,119 @@
 import { EdgeTTSService } from "@/service/edge-tts-service"
+import {
+    DEFAULT_OUTPUT_FORMAT,
+    MsTranslatorTTSService,
+    OUTPUT_FORMATS,
+    OUTPUT_REGIONS,
+    getStableOutputFormat,
+    outputFormatContentType,
+} from "@/service/ms-translator-tts-service"
 import { TTSOptions } from "@/service/tts-service"
 
-// 该路由依赖请求头/查询参数，声明为纯动态路由，避免构建期静态预渲染尝试
 export const dynamic = "force-dynamic"
 
-Error.stackTraceLimit = Infinity;
+class RequestValidationError extends Error {}
+
 export async function GET(request: Request) {
     try {
         const authorization = request.headers.get('authorization')
         const requiredToken = process.env.MS_RA_FORWARDER_TOKEN || process.env.TOKEN
-
-        // 如果设置了环境变量，则需要验证token
-        if (requiredToken) {
-            if (!authorization || authorization !== 'Bearer ' + requiredToken) {
-                return new Response('Unauthorized', { status: 401 })
-            }
+        if (requiredToken && authorization !== 'Bearer ' + requiredToken) {
+            return new Response('Unauthorized', { status: 401 })
         }
+
         const { searchParams } = new URL(request.url)
         const text = String(searchParams.get('text') ?? '')
         if (!text) {
-            return new Response(JSON.stringify({ error: 'Text is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+            return Response.json({ error: 'Text is required' }, { status: 400 })
         }
         const voice = String(searchParams.get('voice') ?? '')
         if (!voice) {
-            return new Response(JSON.stringify({ error: 'Voice is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+            return Response.json({ error: 'Voice is required' }, { status: 400 })
         }
-        const parseNumberParam = (paramName: string, defaultValue: number, min: number, max: number) => {
-            const paramValue = searchParams.get(paramName);
-            if (paramValue === null || paramValue === undefined) {
-                return defaultValue;
-            }
-            try {
-                const num = Number(paramValue)
-                if (Number.isNaN(num)) throw new Error('NaN')
-                if (num < min || num > max) throw new Error('out of range')
-                return num
-            } catch {
-                console.error(`Invalid ${paramName} value: ${paramValue}`);
-                throw new Error(`Invalid ${paramName} value`);
-            }
-        };
 
-        const pitch = parseNumberParam('pitch', 0, -100, 100);
-        const rate = parseNumberParam('rate', 0, -100, 100);
-        const volume = parseNumberParam('volume', 100, -100, 100);
-        const personality = searchParams.get('personality') ?? undefined;
-        const service = new EdgeTTSService()
+        const serviceType = String(searchParams.get('service') ?? 'edge').toLowerCase()
+        const isMs = ['ms', 'mstranslator', 'microsoft'].includes(serviceType)
+        if (!isMs && serviceType !== 'edge') {
+            return Response.json({ error: 'Unsupported service. Use edge or ms.' }, { status: 400 })
+        }
+
+        const parseNumberParam = (name: string, defaultValue: number, min: number, max: number) => {
+            const raw = searchParams.get(name)
+            if (raw === null) return defaultValue
+            const value = Number(raw)
+            if (!Number.isFinite(value) || value < min || value > max) {
+                throw new RequestValidationError(`Invalid ${name} value`)
+            }
+            return value
+        }
+        const parseBooleanParam = (name: string, defaultValue: boolean) => {
+            const raw = searchParams.get(name)
+            if (raw === null) return defaultValue
+            if (/^(1|true|yes)$/i.test(raw)) return true
+            if (/^(0|false|no)$/i.test(raw)) return false
+            throw new RequestValidationError(`Invalid ${name} value`)
+        }
+
+        const rate = parseNumberParam('rate', 0, -100, 100)
+        const pitch = parseNumberParam('pitch', 0, -100, 100)
+        // UI semantics: volume 0 is neutral for both services; preserve legacy API's
+        // absent-value default for Edge, while MS uses the slider's center.
+        const volume = parseNumberParam('volume', isMs ? 0 : 100, -100, 100)
+        const personality = searchParams.get('style') ?? searchParams.get('personality') ?? undefined
+        const role = searchParams.get('role') ?? undefined
+        const styleDegree = parseNumberParam('styleDegree', 1, 0, 2)
+        const safeMode = searchParams.has('safeMode')
+            ? parseBooleanParam('safeMode', true)
+            : parseBooleanParam('msSafeMode', true)
+        const omni = parseBooleanParam('omni', false)
+        const langSkill = searchParams.get('langSkill') ?? undefined
+        const autoStyleRules = searchParams.get('autoStyleRules') ?? searchParams.get('as') ?? undefined
+        const format = searchParams.get('format') || DEFAULT_OUTPUT_FORMAT
+        const region = searchParams.get('region') || 'auto'
+
         const options: TTSOptions = {
             voice,
             volume,
             rate,
             pitch,
             personality,
+            role,
+            styleDegree,
+            safeMode,
+            omni,
+            langSkill,
+            autoStyleRules,
+            format: isMs ? format : undefined,
+            region: isMs ? region : undefined,
         }
+
+        let service: EdgeTTSService | MsTranslatorTTSService
+        let contentType = 'audio/mpeg'
+        if (isMs) {
+            if (!OUTPUT_FORMATS.includes(format as typeof OUTPUT_FORMATS[number])) {
+                return Response.json({ error: 'Unsupported output format' }, { status: 400 })
+            }
+            if (!OUTPUT_REGIONS.some(item => item.value === region)) {
+                return Response.json({ error: 'Unsupported region' }, { status: 400 })
+            }
+            service = new MsTranslatorTTSService()
+            const effectiveFormat = getStableOutputFormat(format, omni, safeMode)
+            contentType = outputFormatContentType(effectiveFormat)
+        } else {
+            service = new EdgeTTSService()
+        }
+
         const speech = await service.convert(text, options)
-        const audioBlob = new Blob([speech.audio], { type: 'audio/mpeg' });
-        return new Response(audioBlob, { status: 200, headers: { 'Content-Type': 'audio/mpeg' } })
+        return new Response(new Blob([speech.audio], { type: contentType }), {
+            status: 200,
+            headers: { 'Content-Type': contentType },
+        })
     } catch (error) {
+        if (error instanceof RequestValidationError) {
+            return Response.json({ error: error.message }, { status: 400 })
+        }
         console.error('textToSpeach error', error)
-        console.error("Full stack", (error as Error).stack)
-        return new Response(JSON.stringify({ error: (error as Error).message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+        console.error('Full stack', (error as Error).stack)
+        return Response.json({ error: (error as Error).message }, { status: 500 })
     }
 }

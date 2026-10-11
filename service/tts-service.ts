@@ -7,6 +7,10 @@ export const VoiceSchema = z.object({
     gender: z.string(),
     format: z.string(),
     personalities: z.array(z.string()),
+    roles: z.array(z.string()).optional(),
+    secondaryLocales: z.array(z.string()).optional(),
+    voiceType: z.string().optional(),
+    omniCapable: z.boolean().optional(),
 })
 
 export type Voice = z.infer<typeof VoiceSchema>
@@ -17,6 +21,14 @@ export const TTSOptionsSchema = z.object({
     rate: z.number().min(-100).max(100).default(0),
     pitch: z.number().min(-100).max(100).default(0),
     personality: z.string().optional(),
+    role: z.string().optional(),
+    styleDegree: z.number().min(0).max(2).optional(),
+    region: z.string().optional(),
+    format: z.string().optional(),
+    langSkill: z.string().optional(),
+    omni: z.boolean().optional(),
+    safeMode: z.boolean().optional(),
+    autoStyleRules: z.string().optional(),
 })
 
 export type TTSOptions = z.infer<typeof TTSOptionsSchema>

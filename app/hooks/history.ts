@@ -11,6 +11,7 @@ export const HistoryRecordSchame = z.object({
     id: z.string().uuid(),
     uri: z.string(),
     text: z.string(),
+    service: z.enum(['edge', 'ms']).optional(),
     options: TTSOptionsSchema,
     createAt: z.number()
 })
