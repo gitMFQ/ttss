@@ -1,6 +1,6 @@
 # MS Read Aloud Forwarder (ms-text-to-speech)
 
-一个基于 Next.js 构建的文本转语音（TTS）服务，通过调用 Microsoft Edge 浏览器的“大声朗读”接口，将文本转换为语音并提供 API 供第三方应用（如阅读 App）调用。
+一个文本转语音（TTS）服务，通过 Microsoft Edge“大声朗读”与微软翻译通道生成语音，并提供 API 供阅读 App 等第三方应用调用。仓库保留原有 Next.js 实现，并新增独立的 Go 全栈重写版（见 `go/`），可单独运行和部署。
 
 ## 功能特性
 
@@ -20,8 +20,20 @@
 - **状态管理**: React Hook Form + TanStack Query
 - **验证**: Zod
 - **其他**: WebSocket（实时通信）、Keyv（缓存）等
+- **Go 重写版**: Go 1.23+、标准库 HTTP、Gorilla WebSocket；UI 使用嵌入式 HTML/CSS/JS
 
-## 快速开始
+## Go 版本（全栈重写）
+
+完整 Go 版本位于 [`go/`](go/)，包含嵌入式 Web UI、登录鉴权、Edge / 微软翻译 TTS、音色列表、Legado 导入与本地历史。原 Next.js 源码暂时保留，便于迁移期间对照。
+
+```bash
+cd go
+go run ./cmd/server
+```
+
+默认监听 `:3000`。如原 Next.js 服务仍在该端口运行，可改用 `ADDR=:3100 go run ./cmd/server`。认证配置沿用 `MS_RA_FORWARDER_TOKEN`（优先）或 `TOKEN`；反向代理部署可设置 `PUBLIC_BASE_URL=https://你的域名`。更多说明见 [`go/README_GO.md`](go/README_GO.md)。
+
+## 快速开始（原 Next.js 版本）
 
 ### 手动运行
 

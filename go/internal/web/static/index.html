@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7fb">
+  <title>MS Read Aloud Forwarder</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div id="login-view" class="login-screen hidden">
+    <form id="login-form" class="login-card">
+      <div class="brand-mark">朗</div>
+      <p class="eyebrow">TEXT TO SPEECH</p>
+      <h1>MS Read Aloud Forwarder</h1>
+      <p class="muted">免费的多语言文本转语音服务</p>
+      <label for="login-token">访问令牌</label>
+      <input id="login-token" type="password" autocomplete="current-password" placeholder="请输入访问令牌" required>
+      <p id="login-error" class="error hidden"></p>
+      <button class="button primary full" type="submit">登录并继续</button>
+    </form>
+  </div>
+
+  <div id="app-view" class="app hidden">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark small">朗</div>
+        <div><strong>MS Read Aloud Forwarder</strong><span>文本转语音工作台</span></div>
+      </div>
+      <div class="topbar-actions">
+        <span class="status-pill"><i></i> 服务就绪</span>
+        <button id="logout-button" class="button ghost hidden" type="button" title="登出">登出</button>
+      </div>
+    </header>
+
+    <main class="page-wrap">
+      <section class="intro">
+        <div>
+          <p class="eyebrow">VOICE STUDIO</p>
+          <h1>让文字，自然开口。</h1>
+          <p class="muted">选择音色与语气，生成可播放的语音，也可以直接导入阅读 APP。</p>
+        </div>
+        <div class="intro-badge"><span class="sparkle">✦</span><span>Edge Read Aloud<br><b>+ Microsoft Translator</b></span></div>
+      </section>
+
+      <section class="workspace">
+        <div class="editor-card card">
+          <div class="card-heading">
+            <div><span class="step">01</span><h2>语音设置</h2></div>
+            <span id="voice-count" class="muted tiny"></span>
+          </div>
+          <div class="settings-grid">
+            <div class="field">
+              <label for="service">合成通道</label>
+              <select id="service"><option value="edge">Edge 大声朗读</option><option value="ms">微软翻译</option></select>
+              <small id="service-hint" class="muted">免费 · 稳定自然的 Neural 音色</small>
+            </div>
+            <div class="field">
+              <label for="locale">地区 / 语言</label>
+              <select id="locale"><option value="">加载中…</option></select>
+            </div>
+            <div class="field full-row">
+              <label for="voice">发音人</label>
+              <input id="voice-filter" type="search" placeholder="搜索发音人…" autocomplete="off">
+              <select id="voice"><option value="">加载音色列表…</option></select>
+            </div>
+            <div class="field full-row">
+              <label for="personality">讲话风格</label>
+              <select id="personality"><option value="">默认</option></select>
+            </div>
+          </div>
+
+          <section id="ms-options" class="advanced hidden">
+            <div class="section-label"><span>微软语音选项</span><span class="muted tiny">可按需调整</span></div>
+            <div class="toggle-row">
+              <label class="check-label"><input id="safe-mode" type="checkbox" checked><span><b>有声书稳定模式</b><small>固定 24kHz / 160k MP3，限制易出错的参数</small></span></label>
+              <label class="check-label" id="omni-label"><input id="omni" type="checkbox"><span><b>全场景音色 (Omni)</b><small>仅适用于普通 Neural 音色</small></span></label>
+            </div>
+            <div class="settings-grid compact-grid">
+              <div class="field"><label for="region">微软 TTS 区域</label><select id="region">
+                <option value="auto">自动（令牌区域）</option><option value="hd">高清区域（HD）</option>
+                <option value="eastasia">东亚</option><option value="southeastasia">东南亚</option><option value="northeurope">北欧</option><option value="westeurope">西欧</option><option value="westus">美国西部</option><option value="eastus">美国东部</option>
+              </select></div>
+              <div class="field"><label for="format">输出格式</label><select id="format">
+                <option>audio-16khz-32kbitrate-mono-mp3</option><option>audio-16khz-64kbitrate-mono-mp3</option><option>audio-16khz-128kbitrate-mono-mp3</option>
+                <option>audio-24khz-48kbitrate-mono-mp3</option><option>audio-24khz-96kbitrate-mono-mp3</option><option selected>audio-24khz-160kbitrate-mono-mp3</option>
+                <option>audio-48khz-96kbitrate-mono-mp3</option><option>audio-48khz-192kbitrate-mono-mp3</option><option>webm-16khz-16bit-mono-opus</option><option>webm-24khz-16bit-mono-opus</option>
+                <option>webm-24khz-16bit-24kbps-mono-opus</option><option>ogg-16khz-16bit-mono-opus</option><option>ogg-24khz-16bit-mono-opus</option><option>ogg-48khz-16bit-mono-opus</option><option>amr-wb-16000hz</option>
+                <option>riff-8khz-8bit-mono-alaw</option><option>riff-8khz-8bit-mono-mulaw</option><option>riff-8khz-16bit-mono-pcm</option><option>riff-16khz-16bit-mono-pcm</option><option>riff-22050hz-16bit-mono-pcm</option><option>riff-24khz-16bit-mono-pcm</option><option>riff-44100hz-16bit-mono-pcm</option><option>riff-48khz-16bit-mono-pcm</option>
+              </select><small id="format-hint" class="muted hidden">稳定模式固定为 24kHz / 160k MP3。</small></div>
+              <div id="language-field" class="field hidden"><label for="lang-skill">语言技能 (langSkill)</label><select id="lang-skill"><option value="">默认音色语言</option></select></div>
+              <div id="role-field" class="field hidden"><label for="role">角色 (role)</label><select id="role"><option value="default">默认角色</option></select></div>
+              <div id="degree-field" class="field hidden"><label for="style-degree">风格强度 <span id="degree-value">1.0</span></label><input id="style-degree" type="range" min="0" max="2" step="0.1" value="1"></div>
+              <div id="rules-field" class="field full-row hidden"><label for="style-rules">自动风格规则</label><textarea id="style-rules" rows="3" placeholder="cheerful[开心|哈哈]&#10;sad[难过|悲伤]&#10;angry[愤怒|滚]"></textarea><small class="muted">每行格式：style[关键词|关键词]。</small></div>
+            </div>
+          </section>
+
+          <div class="section-label slider-title"><span>声音参数</span><span class="muted tiny">0 为默认</span></div>
+          <div class="sliders">
+            <label class="range-field"><span>语速 <b id="rate-value">0</b></span><input id="rate" type="range" min="-100" max="100" value="0"></label>
+            <label class="range-field"><span>语调 <b id="pitch-value">0</b></span><input id="pitch" type="range" min="-100" max="100" value="0"></label>
+            <label class="range-field"><span>音量 <b id="volume-value">0</b></span><input id="volume" type="range" min="-100" max="100" value="0"></label>
+          </div>
+
+          <div class="import-box">
+            <div><strong>导入到阅读 APP</strong><small>生成 Legado TTS 配置链接或扫码导入</small></div>
+            <div class="import-actions"><button id="legado-button" class="button outline" type="button">↗ 直接导入</button><button id="qr-button" class="button outline" type="button">▦ 扫码导入</button></div>
+          </div>
+        </div>
+
+        <div class="text-card card">
+          <div class="card-heading">
+            <div><span class="step">02</span><h2>输入文本</h2></div>
+            <span id="char-count" class="muted tiny">0 字</span>
+          </div>
+          <textarea id="text" class="text-input" placeholder="在这里输入或粘贴要朗读的内容…">君不见黄河之水天上来，奔流到海不复回。</textarea>
+          <div class="text-footer"><span class="muted tiny">支持中文、English 及多种语言</span><button id="convert-button" class="button primary convert-button" type="button"><span>生成语音</span><span class="arrow">→</span></button></div>
+          <p id="form-error" class="error hidden"></p>
+          <div id="latest-audio" class="latest-audio hidden"><div class="section-label"><span>生成结果</span><a id="download-audio" class="text-link" download="speech.mp3">下载音频 ↓</a></div><audio id="preview-audio" controls></audio></div>
+        </div>
+
+        <aside class="history-card card">
+          <div class="card-heading history-heading"><div><span class="step">03</span><h2>生成历史</h2></div><span id="history-count" class="count-badge">0</span></div>
+          <div id="history-list" class="history-list"><div class="empty-state"><div class="empty-icon">◷</div><b>还没有生成记录</b><span>生成的语音会保存在此处</span></div></div>
+        </aside>
+      </section>
+      <footer class="page-footer">语音由 Microsoft Edge Read Aloud / Microsoft Translator 提供 · 历史记录仅保存在当前浏览器</footer>
+    </main>
+  </div>
+
+  <dialog id="qr-dialog" class="qr-dialog">
+    <div class="dialog-heading"><div><p class="eyebrow">LEGADO IMPORT</p><h2>扫码导入到阅读 APP</h2></div><button id="close-qr" class="icon-button" type="button" aria-label="关闭">×</button></div>
+    <img id="qr-image" width="256" height="256" alt="Legado 导入二维码">
+    <p class="muted center">使用阅读 APP 扫描二维码，或复制下方配置链接。</p>
+    <div class="copy-row"><input id="qr-url" readonly><button id="copy-url" class="button outline" type="button">复制</button></div>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

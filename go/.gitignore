@@ -1,0 +1,3 @@
+# Compiled Go binary (build artifact)
+/ttss
+*.exe
