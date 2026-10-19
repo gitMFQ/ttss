@@ -39,7 +39,7 @@ go run ./cmd/server
 
 ```bash
 # 版本号与文件名请到仓库 Releases 页面确认
-curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.0.0/ttss-linux-amd64
+curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.1.0/ttss-linux-amd64
 chmod +x ttss-linux-amd64
 ./ttss-linux-amd64
 ```
@@ -293,6 +293,17 @@ WebSocket 握手是 Edge TTS 最大的延迟来源。为减少该开销，本服
 - **超时隔离**：单个 turn 超时或调用方取消时，该连接会被丢弃重建，避免残留帧污染后续请求
 
 > 具体延迟取决于本机到微软服务器的网络质量，本仓库不再给出未经测量的固定数值；如需基准数据请自行压测。
+
+### 从 v1.0.0 升级（v1.1.0）
+
+v1.1.0 之前，Edge TTS 每次合成都新建一条 WebSocket，且单条连接在一个 turn 结束后会被占用满一个超时周期才释放，导致同一连接上的后续请求串行排队。v1.1.0 起改为长连接池复用：
+
+- 每个 turn 结束后立即把连接让给下一个请求
+- 连接在应答前断开时自动重试一次
+- 补齐心跳、空闲回收与超时隔离（见上方环境变量）
+- 修复 TS 端二进制帧多读 2 字节导致音频首部带垃圾数据的问题
+
+升级后无需改动配置；如需调整并发，可设置 `TTS_POOL_SIZE`。
 
 国内网络下可能出现 WSS 握手数秒的尖峰（微软服务端排队）。若遭遇此问题，可设置 `TTS_PROXY=http://127.0.0.1:7890`（mihomo / Clash 默认端口）走 HTTP CONNECT 隧道出站；语音列表与合成会共用同一代理。
 
