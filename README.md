@@ -272,6 +272,29 @@ curl -H "Authorization: Bearer mySecret123" \
 | `TOKEN` | 否 | API 访问令牌，设置后启用认证 |
 | `MS_RA_FORWARDER_TOKEN` | 否 | 同上，优先级更高 |
 | `PORT` | 否 | 服务端口，默认 `3000`（注意：写在 `.env` 中无效，见下文） |
+| `TTS_PROXY` | 否 | HTTP 代理，例如 `http://127.0.0.1:7890`，用于让 Edge TTS 的 WebSocket 通过 HTTP CONNECT 隧道出站。优先级最高；留空则直连 |
+| `HTTPS_PROXY` | 否 | 同上，仅在未设置 `TTS_PROXY` 时生效 |
+| `HTTP_PROXY` | 否 | 同上，仅在未设置 `TTS_PROXY` 和 `HTTPS_PROXY` 时生效 |
+| `TTS_POOL_SIZE` | 否 | 维持多少个长连接，默认 `3`。并发请求量较大时可调到 5–10 |
+| `TTS_IDLE_TIMEOUT_MIN` | 否 | 连接空闲多久后主动关闭（分钟），默认 `5` |
+| `TTS_TURN_TIMEOUT_SEC` | 否 | 单个合成请求的总超时（秒，含排队时间），默认 `60` |
+| `TTS_PING_INTERVAL_SEC` | 否 | WebSocket 心跳间隔（秒），默认 `30` |
+
+> 💡 以上变量在 Go 版本里同样生效，变量名一致。
+
+## Edge TTS 连接复用
+
+WebSocket 握手是 Edge TTS 最大的延迟来源。为减少该开销，本服务内部维护一个长连接池：
+
+- **连接复用**：每条 WebSocket 上串行处理多个 turn（服务端要求 FIFO），每个 turn 结束后立刻释放连接给下一个请求
+- **健康检查**：默认每 30 秒发送一次 WebSocket ping；读超时为 70 秒，超时或出错即判定连接死亡并重建
+- **空闲关闭**：连接空闲超过 `TTS_IDLE_TIMEOUT_MIN` 后主动断开
+- **失败重试**：连接在请求被应答之前断开时，该请求会自动在新连接上重试一次
+- **超时隔离**：单个 turn 超时或调用方取消时，该连接会被丢弃重建，避免残留帧污染后续请求
+
+> 具体延迟取决于本机到微软服务器的网络质量，本仓库不再给出未经测量的固定数值；如需基准数据请自行压测。
+
+国内网络下可能出现 WSS 握手数秒的尖峰（微软服务端排队）。若遭遇此问题，可设置 `TTS_PROXY=http://127.0.0.1:7890`（mihomo / Clash 默认端口）走 HTTP CONNECT 隧道出站；语音列表与合成会共用同一代理。
 
 ## 监听地址与端口
 

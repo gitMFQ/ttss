@@ -25,9 +25,12 @@ func main() {
 	}
 	publicURL := os.Getenv("PUBLIC_BASE_URL")
 
+	speech := tts.NewService()
+	defer speech.Close()
+
 	server := &http.Server{
 		Addr:              address,
-		Handler:           web.New(tts.NewService(), token, publicURL).Handler(),
+		Handler:           web.New(speech, token, publicURL).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

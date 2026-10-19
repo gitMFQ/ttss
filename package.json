@@ -26,6 +26,7 @@
     "cmdk": "^1.0.0",
     "dayjs": "^1.11.13",
     "fast-xml-parser": "^4.5.1",
+    "https-proxy-agent": "^7.0.6",
     "idb": "^8.0.2",
     "keyv": "^5.2.3",
     "lucide-react": "^0.469.0",
