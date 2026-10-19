@@ -35,13 +35,21 @@ go run ./cmd/server
 
 #### 直接下载预编译二进制
 
-每次推送 `v*` 标签，GitHub Actions 会编译 Linux 的 `amd64` / `arm64` 二进制并发布到 Releases 页面：
+每次推送 `v*` 标签，GitHub Actions 会编译 Linux 的 `amd64` / `arm64` 二进制并发布到 Releases 页面。Release 只提供 `.tar.gz` 归档（内含二进制与 `README_GO.md`），不提供裸二进制：
 
 ```bash
-# 版本号与文件名请到仓库 Releases 页面确认
-curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.1.0/ttss-linux-amd64
+# 版本号请到仓库 Releases 页面确认；架构可选 amd64 / arm64
+curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.1.0/ttss-linux-amd64.tar.gz
+tar -xzf ttss-linux-amd64.tar.gz
 chmod +x ttss-linux-amd64
 ./ttss-linux-amd64
+```
+
+每个归档都附带同名的 `.sha256` 校验文件：
+
+```bash
+curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.1.0/ttss-linux-amd64.tar.gz.sha256
+sha256sum -c ttss-linux-amd64.tar.gz.sha256
 ```
 
 ### Sec-MS-GEC v2（2026-10-19）
