@@ -3,7 +3,6 @@ package tts
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -19,8 +18,17 @@ import (
 
 const (
 	trustedClientToken = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
-	chromiumVersion    = "157.0.4329.0"
-	voicesListURL      = "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list"
+	// chromiumVersion tracks the version upstream edge-tts ships. Claiming a major
+	// newer than what Microsoft has deployed can trip fingerprint checks.
+	chromiumVersion = "143.0.3650.75"
+	chromiumMajor   = "143"
+	// secMSGECVersion must carry the v2 prefix: the older v1 token format is now
+	// rejected with HTTP 403 during the WebSocket handshake.
+	secMSGECVersion = "2-" + chromiumVersion
+	voicesListURL   = "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list"
+	// edgeUserAgent presents as desktop Edge, matching upstream edge-tts headers.
+	edgeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" +
+		chromiumMajor + ".0.0.0 Safari/537.36 Edg/" + chromiumMajor + ".0.0.0"
 )
 
 type edgeVoice struct {
@@ -77,12 +85,15 @@ func (s *Service) edgeSynthesize(ctx context.Context, text string, options Optio
 	if err != nil {
 		return nil, err
 	}
-	secMSGEC := generateSecMSGEC(time.Now())
+	secMSGEC, err := generateSecMSGECv2(float64(time.Now().Unix()))
+	if err != nil {
+		return nil, fmt.Errorf("generate Sec-MS-GEC token: %w", err)
+	}
 	u := url.URL{Scheme: "wss", Host: "speech.platform.bing.com", Path: "/consumer/speech/synthesize/readaloud/edge/v1"}
 	query := u.Query()
 	query.Set("TrustedClientToken", trustedClientToken)
 	query.Set("Sec-MS-GEC", secMSGEC)
-	query.Set("Sec-MS-GEC-Version", "1-"+chromiumVersion)
+	query.Set("Sec-MS-GEC-Version", secMSGECVersion)
 	query.Set("ConnectionId", connectionID)
 	u.RawQuery = query.Encode()
 
@@ -90,7 +101,7 @@ func (s *Service) edgeSynthesize(ctx context.Context, text string, options Optio
 	dialer.HandshakeTimeout = 15 * time.Second
 	header := http.Header{}
 	header.Set("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
-	header.Set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36 EdgA/157.0.0.0")
+	header.Set("User-Agent", edgeUserAgent)
 	conn, resp, err := dialer.DialContext(ctx, u.String(), header)
 	if err != nil {
 		if resp != nil {
@@ -165,15 +176,6 @@ func (s *Service) edgeSynthesize(ctx context.Context, text string, options Optio
 
 func buildEdgeSSML(text string, options Options) string {
 	return `<speak xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" xmlns:emo="http://www.w3.org/2009/10/emotionml" version="1.0" xml:lang="en-US"><voice name="` + escapeXML(options.Voice) + `"><prosody volume="` + fmt.Sprintf("%g%%", options.Volume) + `" rate="` + fmt.Sprintf("%g%%", options.Rate) + `" pitch="` + fmt.Sprintf("%g%%", options.Pitch) + `">` + escapeXML(text) + `</prosody></voice></speak>`
-}
-
-func generateSecMSGEC(now time.Time) string {
-	const windowsEpochSeconds int64 = 11644473600
-	const quantum int64 = 3000000000
-	ticks := (now.Unix() + windowsEpochSeconds) * 10000000
-	rounded := ticks - ticks%quantum
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d%s", rounded, trustedClientToken)))
-	return strings.ToUpper(hex.EncodeToString(sum[:]))
 }
 
 func randomHex(bytes int) (string, error) {

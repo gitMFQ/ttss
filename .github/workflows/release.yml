@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: go/go.sum
+
+      - name: Test
+        working-directory: go
+        run: go test ./...
+
+      - name: Build binary
+        working-directory: go
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w" \
+            -o "dist/ttss-${{ matrix.goos }}-${{ matrix.goarch }}" \
+            ./cmd/server
+
+      - name: Package
+        working-directory: go
+        run: |
+          cd dist
+          cp ../README_GO.md ../go.mod ../go.sum . 2>/dev/null || true
+          tar -czf "ttss-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" \
+            "ttss-${{ matrix.goos }}-${{ matrix.goarch }}" README_GO.md
+          sha256sum "ttss-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" \
+            > "ttss-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ttss-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            go/dist/*.tar.gz
+            go/dist/*.sha256
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: ${{ inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256

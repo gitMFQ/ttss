@@ -3,7 +3,6 @@ package tts
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestEdgeFrameHelpers(t *testing.T) {
@@ -18,8 +17,14 @@ func TestEdgeFrameHelpers(t *testing.T) {
 }
 
 func TestSecMSGECStableWithinFiveMinuteBucket(t *testing.T) {
-	a := generateSecMSGEC(time.Unix(300, 0))
-	b := generateSecMSGEC(time.Unix(301, 0))
+	a, err := generateSecMSGECv2(300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := generateSecMSGECv2(301)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if a != b {
 		t.Fatalf("token should be stable in same bucket: %q != %q", a, b)
 	}

@@ -33,6 +33,29 @@ go run ./cmd/server
 
 默认监听 `:3000`。如原 Next.js 服务仍在该端口运行，可改用 `ADDR=:3100 go run ./cmd/server`。认证配置沿用 `MS_RA_FORWARDER_TOKEN`（优先）或 `TOKEN`；反向代理部署可设置 `PUBLIC_BASE_URL=https://你的域名`。更多说明见 [`go/README_GO.md`](go/README_GO.md)。
 
+#### 直接下载预编译二进制
+
+每次推送 `v*` 标签，GitHub Actions 会编译 Linux 的 `amd64` / `arm64` 二进制并发布到 Releases 页面：
+
+```bash
+# 版本号与文件名请到仓库 Releases 页面确认
+curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.0.0/ttss-linux-amd64
+chmod +x ttss-linux-amd64
+./ttss-linux-amd64
+```
+
+### Sec-MS-GEC v2（2026-10-19）
+
+微软已废弃 Edge TTS 的 `Sec-MS-GEC` **v1** 令牌算法并切换到 v2。继续使用 v1 会在 WebSocket 握手阶段返回 **HTTP 403**。
+
+v2 令牌格式为 `<16 位十六进制 CS64>-<64 位十六进制摘要>`（共 81 字符），由自研 SHA-256 与 CS64 双段摘要组成；`Sec-MS-GEC-Version` 也须由 `1-` 改为 `2-` 前缀。
+
+> ⚠️ 该摘要**不是标准 SHA-256**（上游刻意扰动了轮常量与消息调度），无法用 `crypto/sha256`、`node:crypto` 等标准库实现，必须按上游算法移植。
+>
+> 💡 国内网络下遇到 403 通常**不是**被墙或地域限制：同域名同 IP 下 `voices/list` 接口仍返回 200，只有握手被拒。请优先升级到 v2，而非依赖代理绕过。
+
+移植实现见 [`go/internal/tts/drm.go`](go/internal/tts/drm.go)（Go）与 [`service/edge-tts-service/drm.ts`](service/edge-tts-service/drm.ts)（TypeScript），二者均用上游 `edge-tts` 的参考向量做了逐位校验。
+
 ## 快速开始（原 Next.js 版本）
 
 ### 手动运行
@@ -337,7 +360,12 @@ export default nextConfig;
 
 ## 重要更新历史
 
-### 本次更新
+### 2026-10-19
+- 🐛 **修复 Edge TTS 无法合成（WebSocket 握手 403）**：微软已废弃 `Sec-MS-GEC` v1 令牌，本项目 Go 与 TypeScript 两套实现均已移植 v2 算法（自研 SHA-256 + CS64 双段摘要），`Sec-MS-GEC-Version` 同步改为 `2-` 前缀。
+- 💡 该问题与网络环境无关，无需代理即可直连使用（详见上文「Sec-MS-GEC v2」）。
+- 🚀 新增 GitHub Actions 流水线：推送 `v*` 标签自动编译 Linux `amd64` / `arm64` 二进制并发布 Release。
+
+### 2026-10-12
 - ✨ 新增微软翻译免费通道（`service=ms`）：无需 Azure 订阅密钥，`personality` 讲话风格真正生效（映射为 `mstts:express-as`），令牌自动缓存与刷新。
 
 ### 2025-08-20
