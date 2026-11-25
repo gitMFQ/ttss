@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- ✅ 支持 Microsoft Edge 浏览器“大声朗读”TTS 接口（v2/v1 双端点自动 fallback）
+- ✅ 支持 Microsoft Edge 浏览器“大声朗读”TTS 接口（v2/v1 双端点自动 fallback，可手动指定端点）
 - ✅ 支持微软翻译免费通道（`service=ms`），无需 Azure 订阅密钥，且支持讲话风格（personality）
 - ✅ 提供简洁的 Web 界面，支持文本输入、参数调节和历史记录
 - ✅ 提供 RESTful API 接口，便于集成到第三方应用
@@ -39,7 +39,7 @@ go run ./cmd/server
 
 ```bash
 # 版本号请到仓库 Releases 页面确认；架构可选 amd64 / arm64
-curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.2.0/ttss-linux-amd64.tar.gz
+curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.3.0/ttss-linux-amd64.tar.gz
 tar -xzf ttss-linux-amd64.tar.gz
 chmod +x ttss-linux-amd64
 ./ttss-linux-amd64
@@ -48,7 +48,7 @@ chmod +x ttss-linux-amd64
 每个归档都附带同名的 `.sha256` 校验文件：
 
 ```bash
-curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.2.0/ttss-linux-amd64.tar.gz.sha256
+curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.3.0/ttss-linux-amd64.tar.gz.sha256
 sha256sum -c ttss-linux-amd64.tar.gz.sha256
 ```
 
@@ -174,6 +174,7 @@ tmux kill-session -t ttss
 | omni | boolean | 否 | false | 普通 Neural 音色转为 Dragon HD Omni（仅支持的音色生效） |
 | safeMode / msSafeMode | boolean | 否 | true | 稳定模式：固定 24k/160k MP3、收敛 prosody、使用默认 style/role |
 | autoStyleRules / as | string | 否 | - | 自动风格规则，每行 `style[关键词|关键词]` |
+| edge_endpoint | string | 否 | 自动 | Edge 端点：`v1` 或 `v2`；不传或留空按 v2 优先自动回退 |
 | service | string | 否 | edge | TTS 通道：`edge` 或 `ms`（微软翻译免费通道） |
 
 **关于 `service=ms`（微软翻译免费通道）**：
@@ -301,9 +302,17 @@ WebSocket 握手是 Edge TTS 最大的延迟来源。为减少该开销，本服
 - **空闲关闭**：连接空闲超过 `TTS_IDLE_TIMEOUT_MIN` 后主动断开
 - **失败重试**：连接在请求被应答之前断开时，该请求会自动在新连接上重试一次
 - **超时隔离**：单个 turn 超时或调用方取消时，该连接会被丢弃重建，避免残留帧污染后续请求
-- **静音回退**：纯标点/空白等无可朗读内容的文本，微软会返回不带音频的 `turn.end`；本服务自动补一段约 0.17s 的静音 MP3，避免阅读类客户端把该句记为播放错误
+- **静音回退**：纯标点/空白等无可朗读内容的文本，微软会返回不带音频的 `turn.end`；本服务自动补一段约 0.01s 的静音 MP3，避免阅读类客户端把该句记为播放错误
 
 > 具体延迟取决于本机到微软服务器的网络质量，本仓库不再给出未经测量的固定数值；如需基准数据请自行压测。
+
+### 从 v1.2.0 升级（v1.3.0）
+
+v1.3.0 支持指定 Edge 端点并把静音缩短到约 0.01s：
+
+- **端点选择**：WebUI 新增「Edge 端点」下拉；朗读 URL 与 Legado 导入支持 `edge_endpoint=v1|v2`，不传时保持 v2 优先自动回退
+- **静音缩短**：无可朗读内容的文本返回约 0.01s 的静音 MP3（原 0.17s）
+- Go 版与 Next.js 版行为一致，均支持上述能力
 
 ### 从 v1.1.0 升级（v1.2.0）
 
@@ -405,10 +414,14 @@ export default nextConfig;
 
 ## 重要更新历史
 
+### 2026-11-25（v1.3.0）
+- 🎛️ **Edge 端点可选**：WebUI 与朗读 URL / Legado 导入新增 `edge_endpoint=v1|v2`；不指定时保持 v2 优先自动回退。
+- ⏱️ **静音缩短**：无可朗读内容返回的静音 MP3 由约 0.17s 缩短到约 0.01s。
+
 ### 2026-11-25
 - ✨ **合并上游 Edge TTS 更新**：v2（`api.msedgeservices.com`）/ v1（`speech.platform.bing.com`）双端点聚合与自动 fallback，按端点独立连接池并记忆最近走通的后端。
 - 🔧 **握手指纹升级**：Chromium 版本升至 `144.0.3719.82`，握手头补齐 `Pragma`/`Cache-Control`/`Accept-Encoding`/`Accept-Language` 与 `muid` Cookie，握手超时 12 秒。
-- 🎧 **静音回退**：纯标点/空白等无可朗读内容的文本自动返回约 0.17s 的静音 MP3，避免阅读类客户端把该句计为播放错误。
+- 🎧 **静音回退**：纯标点/空白等无可朗读内容的文本自动返回约 0.01s 的静音 MP3，避免阅读类客户端把该句计为播放错误。
 - 🧪 Go 版新增 v2 失败自动回退 v1 的单元测试；`go test`、`go vet`、`gofmt`、`go build` 全绿。
 
 ### 2026-10-19

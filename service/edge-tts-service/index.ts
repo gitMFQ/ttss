@@ -24,7 +24,7 @@ export class EdgeTTSService implements TTSService {
 
     async convert(text: string, options: TTSOptions): Promise<Speech> {
         const ssml = new SSML(text, options.voice, options.volume, options.rate, options.pitch)
-        const speech = await this.convertSSML(ssml.toString())
+        const speech = await this.convertSSML(ssml.toString(), options.edge_endpoint)
         if (speech.audio.byteLength > 0) {
             return speech
         }
@@ -36,12 +36,12 @@ export class EdgeTTSService implements TTSService {
         }
         throw new Error('上游未返回音频数据')
     }
-    private async convertSSML(ssml: string): Promise<Speech> {
+    private async convertSSML(ssml: string, preferredEndpoint?: 'v1' | 'v2'): Promise<Speech> {
         const result = await EdgeTTSClient.convert(ssml, {
             format: "audio-24khz-96kbitrate-mono-mp3",
             sentenceBoundaryEnabled: false,
             wordBoundaryEnabled: false,
-        })
+        }, preferredEndpoint ?? null)
         const sentenceBoundaries = (result.metadata as unknown as EdgeTTSMetadataEntry[]).filter(data => {
             return data["Type"] === "SentenceBoundary"
         }).map(data => {

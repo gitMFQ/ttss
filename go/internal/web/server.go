@@ -239,6 +239,7 @@ func parseOptions(query url.Values, service string) (tts.Options, error) {
 		Personality: personality, Role: query.Get("role"), StyleDegree: degree,
 		Region: query.Get("region"), Format: query.Get("format"), LangSkill: query.Get("langSkill"),
 		Omni: omni, SafeMode: &safeMode, AutoStyleRules: autoRules,
+		EdgeEndpoint: strings.ToLower(strings.TrimSpace(query.Get("edge_endpoint"))),
 	}, nil
 }
 
@@ -265,6 +266,11 @@ func (s *Server) handleLegadoImport(w http.ResponseWriter, r *http.Request) {
 	options, err := parseOptions(query, service)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	options.EdgeEndpoint = strings.ToLower(strings.TrimSpace(query.Get("edge_endpoint")))
+	if options.EdgeEndpoint != "" && options.EdgeEndpoint != "v1" && options.EdgeEndpoint != "v2" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Unsupported edge_endpoint. Use v1 or v2."})
 		return
 	}
 	if service == "ms" {
@@ -305,6 +311,9 @@ func (s *Server) handleLegadoImport(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if query.Has("service") {
 		params.Set("service", query.Get("service"))
+	}
+	if options.EdgeEndpoint != "" {
+		params.Set("edge_endpoint", options.EdgeEndpoint)
 	}
 	queryString := params.Encode()
 	queryString += "&rate={{(speakSpeed - 10) * 2}}&text={{java.encodeURI(speakText)}}"

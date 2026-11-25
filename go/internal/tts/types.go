@@ -29,6 +29,9 @@ type Options struct {
 	Omni           bool    `json:"omni"`
 	SafeMode       *bool   `json:"safeMode"`
 	AutoStyleRules string  `json:"autoStyleRules"`
+	// EdgeEndpoint pins Edge synthesis to "v1" or "v2"; empty keeps the
+	// automatic v2-first fallback behaviour.
+	EdgeEndpoint string `json:"edge_endpoint"`
 }
 
 func (o Options) IsSafeMode() bool {

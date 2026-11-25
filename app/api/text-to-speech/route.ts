@@ -36,6 +36,10 @@ export async function GET(request: Request) {
         if (!isMs && serviceType !== 'edge') {
             return Response.json({ error: 'Unsupported service. Use edge or ms.' }, { status: 400 })
         }
+        const edgeEndpointParam = searchParams.get('edge_endpoint')
+        if (edgeEndpointParam !== null && !['v1', 'v2'].includes(edgeEndpointParam)) {
+            return Response.json({ error: 'Unsupported edge_endpoint. Use v1 or v2.' }, { status: 400 })
+        }
 
         const parseNumberParam = (name: string, defaultValue: number, min: number, max: number) => {
             const raw = searchParams.get(name)
@@ -85,6 +89,7 @@ export async function GET(request: Request) {
             autoStyleRules,
             format: isMs ? format : undefined,
             region: isMs ? region : undefined,
+            edge_endpoint: edgeEndpointParam as 'v1' | 'v2' | undefined,
         }
 
         let service: EdgeTTSService | MsTranslatorTTSService

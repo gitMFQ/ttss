@@ -45,7 +45,7 @@ export async function GET(request: Request) {
             style: searchParams.get('style') ?? undefined,
         }
         if (isMs) {
-            const optionalKeys = ['role', 'styleDegree', 'region', 'format', 'langSkill', 'omni', 'safeMode', 'msSafeMode', 'autoStyleRules', 'as']
+            const optionalKeys = ['role', 'styleDegree', 'region', 'format', 'langSkill', 'omni', 'safeMode', 'msSafeMode', 'autoStyleRules', 'as', 'edge_endpoint']
             for (const key of optionalKeys) {
                 const value = searchParams.get(key)
                 if (value !== null) options[key] = value

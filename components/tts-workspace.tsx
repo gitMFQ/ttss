@@ -364,6 +364,19 @@ export default function TTSWorkspace({ ...props }: TTSWorkspaceProps) {
                             )}
                         ></FormField>
 
+                        {selectedService === 'edge' && <FormField name='options.edge_endpoint' control={form.control}
+                            render={({ field }) => (
+                                <FormItem>
+                                    <Label>Edge 端点</Label>
+                                    <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={field.value ?? ''} onChange={event => field.onChange(event.target.value === '' ? undefined : event.target.value)}>
+                                        <option value="">自动（v2 优先，失败回退 v1）</option>
+                                        <option value="v2">v2（api.msedgeservices.com）</option>
+                                        <option value="v1">v1（speech.platform.bing.com）</option>
+                                    </select>
+                                </FormItem>
+                            )}
+                        />}
+
                         {/* 地区选择器 */}
                         <div>
                             <Popover>

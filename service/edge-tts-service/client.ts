@@ -712,12 +712,18 @@ export class EdgeTTSClient {
         throw lastError
     }
 
-    public static async convert(ssml: string, options: ClientOptions): Promise<ConvertResult> {
+    public static async convert(ssml: string, options: ClientOptions, preferred?: 'v1' | 'v2' | null): Promise<ConvertResult> {
         const startedAt = Date.now()
         let lastError: unknown = null
         let attempts = 0
+        const endpoints = preferred
+            ? EDGE_ENDPOINTS.filter((e) => e.name === preferred)
+            : orderedEndpoints(preferV2ForConvert)
+        if (endpoints.length === 0) {
+            throw new Error(`Unsupported Edge endpoint: ${preferred}`)
+        }
         backends:
-        for (const endpoint of orderedEndpoints(preferV2ForConvert)) {
+        for (const endpoint of endpoints) {
             for (let attempt = 1; attempt <= ATTEMPTS_PER_BACKEND; attempt++) {
                 const spent = Date.now() - startedAt
                 if (spent >= TOTAL_BUDGET_MS) {

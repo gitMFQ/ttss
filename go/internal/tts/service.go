@@ -218,6 +218,11 @@ func (s *Service) Convert(ctx context.Context, service, text string, options Opt
 		return nil, "", fmt.Errorf("voice is required")
 	}
 	if canonical == "edge" {
+		if options.EdgeEndpoint != "" {
+			if _, ok := edgeEndpointByName(options.EdgeEndpoint); !ok {
+				return nil, "", fmt.Errorf("unsupported edge_endpoint; use v1 or v2")
+			}
+		}
 		speech, err := s.edgeSynthesize(ctx, text, options)
 		if err != nil {
 			return nil, "", err

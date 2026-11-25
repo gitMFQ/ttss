@@ -29,6 +29,7 @@ export const TTSOptionsSchema = z.object({
     omni: z.boolean().optional(),
     safeMode: z.boolean().optional(),
     autoStyleRules: z.string().optional(),
+    edge_endpoint: z.enum(['v1', 'v2']).optional(),
 })
 
 export type TTSOptions = z.infer<typeof TTSOptionsSchema>

@@ -126,10 +126,27 @@ func fetchEdgeVoicesFrom(ctx context.Context, client *http.Client, endpoint edge
 // edgeSynthesize submits a turn to the shared connection pool with v2-first
 // backend aggregation: a failed attempt on one endpoint is retried on the
 // other, and the last healthy backend is remembered for future requests.
+// edgeEndpointByName returns the endpoint with the given name, or false when
+// the name is empty or unknown.
+func edgeEndpointByName(name string) (edgeEndpoint, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "v1":
+		return edgeEndpoints[1], true
+	case "v2":
+		return edgeEndpoints[0], true
+	default:
+		return edgeEndpoint{}, false
+	}
+}
+
 func (s *Service) edgeSynthesize(ctx context.Context, text string, options Options) ([]byte, error) {
 	startedAt := time.Now()
 	var lastErr error
-	for _, endpoint := range s.edgeConvertEndpoints() {
+	endpoints := s.edgeConvertEndpoints()
+	if pinned, ok := edgeEndpointByName(options.EdgeEndpoint); ok {
+		endpoints = []edgeEndpoint{pinned}
+	}
+	for _, endpoint := range endpoints {
 		if spent := time.Since(startedAt); spent >= edgeAttemptBudget {
 			break
 		}
