@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- ✅ 支持 Microsoft Edge 浏览器“大声朗读”TTS 接口
+- ✅ 支持 Microsoft Edge 浏览器“大声朗读”TTS 接口（v2/v1 双端点自动 fallback）
 - ✅ 支持微软翻译免费通道（`service=ms`），无需 Azure 订阅密钥，且支持讲话风格（personality）
 - ✅ 提供简洁的 Web 界面，支持文本输入、参数调节和历史记录
 - ✅ 提供 RESTful API 接口，便于集成到第三方应用
@@ -39,7 +39,7 @@ go run ./cmd/server
 
 ```bash
 # 版本号请到仓库 Releases 页面确认；架构可选 amd64 / arm64
-curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.1.0/ttss-linux-amd64.tar.gz
+curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.2.0/ttss-linux-amd64.tar.gz
 tar -xzf ttss-linux-amd64.tar.gz
 chmod +x ttss-linux-amd64
 ./ttss-linux-amd64
@@ -48,7 +48,7 @@ chmod +x ttss-linux-amd64
 每个归档都附带同名的 `.sha256` 校验文件：
 
 ```bash
-curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.1.0/ttss-linux-amd64.tar.gz.sha256
+curl -LO https://github.com/gitMFQ/ttss/releases/download/v1.2.0/ttss-linux-amd64.tar.gz.sha256
 sha256sum -c ttss-linux-amd64.tar.gz.sha256
 ```
 
@@ -290,26 +290,29 @@ curl -H "Authorization: Bearer mySecret123" \
 
 > 💡 以上变量在 Go 版本里同样生效，变量名一致。
 
-## Edge TTS 连接复用
+## Edge TTS 连接复用与 v2/v1 双端点
 
-WebSocket 握手是 Edge TTS 最大的延迟来源。为减少该开销，本服务内部维护一个长连接池：
+WebSocket 握手是 Edge TTS 最大的延迟来源。为减少该开销，本服务内部维护长连接池，并同时支持微软两个 Edge TTS 端点：
 
+- **v2/v1 双端点聚合**：`api.msedgeservices.com`（v2）优先，失败自动回退 `speech.platform.bing.com`（v1）；每个端点独立连接池、独立计数，成功后记住最近走通的端点
+- **单次请求预算**：跨端点重试总预算 45 秒，单次尝试 20 秒，重试间隔 300ms，避免把请求拖到平台超时
 - **连接复用**：每条 WebSocket 上串行处理多个 turn（服务端要求 FIFO），每个 turn 结束后立刻释放连接给下一个请求
 - **健康检查**：默认每 30 秒发送一次 WebSocket ping；读超时为 70 秒，超时或出错即判定连接死亡并重建
 - **空闲关闭**：连接空闲超过 `TTS_IDLE_TIMEOUT_MIN` 后主动断开
 - **失败重试**：连接在请求被应答之前断开时，该请求会自动在新连接上重试一次
 - **超时隔离**：单个 turn 超时或调用方取消时，该连接会被丢弃重建，避免残留帧污染后续请求
+- **静音回退**：纯标点/空白等无可朗读内容的文本，微软会返回不带音频的 `turn.end`；本服务自动补一段约 0.17s 的静音 MP3，避免阅读类客户端把该句记为播放错误
 
 > 具体延迟取决于本机到微软服务器的网络质量，本仓库不再给出未经测量的固定数值；如需基准数据请自行压测。
 
-### 从 v1.0.0 升级（v1.1.0）
+### 从 v1.1.0 升级（v1.2.0）
 
-v1.1.0 之前，Edge TTS 每次合成都新建一条 WebSocket，且单条连接在一个 turn 结束后会被占用满一个超时周期才释放，导致同一连接上的后续请求串行排队。v1.1.0 起改为长连接池复用：
+v1.2.0 同步上游 2026-11 的 Edge TTS 更新：
 
-- 每个 turn 结束后立即把连接让给下一个请求
-- 连接在应答前断开时自动重试一次
-- 补齐心跳、空闲回收与超时隔离（见上方环境变量）
-- 修复 TS 端二进制帧多读 2 字节导致音频首部带垃圾数据的问题
+- **v2/v1 双端点**：新增 `api.msedgeservices.com`（v2）端点并默认优先，`speech.platform.bing.com`（v1）自动兜底
+- **握手指纹升级**：Chromium 版本 `143 → 144.0.3719.82`，握手头补齐 `Pragma`/`Cache-Control`/`Accept-Encoding`/`Accept-Language` 与 `muid` Cookie
+- **静音回退**：无可朗读内容的文本自动返回静音 MP3，避免客户端误判错误
+- Go 版与 Next.js 版行为一致，均支持上述能力
 
 升级后无需改动配置；如需调整并发，可设置 `TTS_POOL_SIZE`。
 
@@ -401,6 +404,12 @@ export default nextConfig;
 > 💡 若希望连错误日志一起剥离，可直接写 `removeConsole: true`。
 
 ## 重要更新历史
+
+### 2026-11-25
+- ✨ **合并上游 Edge TTS 更新**：v2（`api.msedgeservices.com`）/ v1（`speech.platform.bing.com`）双端点聚合与自动 fallback，按端点独立连接池并记忆最近走通的后端。
+- 🔧 **握手指纹升级**：Chromium 版本升至 `144.0.3719.82`，握手头补齐 `Pragma`/`Cache-Control`/`Accept-Encoding`/`Accept-Language` 与 `muid` Cookie，握手超时 12 秒。
+- 🎧 **静音回退**：纯标点/空白等无可朗读内容的文本自动返回约 0.17s 的静音 MP3，避免阅读类客户端把该句计为播放错误。
+- 🧪 Go 版新增 v2 失败自动回退 v1 的单元测试；`go test`、`go vet`、`gofmt`、`go build` 全绿。
 
 ### 2026-10-19
 - 🐛 **修复 Edge TTS 无法合成（WebSocket 握手 403）**：微软已废弃 `Sec-MS-GEC` v1 令牌，本项目 Go 与 TypeScript 两套实现均已移植 v2 算法（自研 SHA-256 + CS64 双段摘要），`Sec-MS-GEC-Version` 同步改为 `2-` 前缀。
