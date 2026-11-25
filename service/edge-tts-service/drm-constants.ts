@@ -53,5 +53,5 @@ export const SHA256_STATE: bigint[] = [0xFD9FBEA2n, 0x91243CE7n, 0xBE499094n, 0x
 export const TRUSTED_CLIENT_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4'
 
 /** Chromium version edge-tts ships; also drives the Sec-MS-GEC version string. */
-export const CHROMIUM_FULL_VERSION = '143.0.3650.75'
+export const CHROMIUM_FULL_VERSION = '144.0.3719.82'
 export const CHROMIUM_MAJOR_VERSION = CHROMIUM_FULL_VERSION.split('.')[0]

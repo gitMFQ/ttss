@@ -5776,6 +5776,7 @@ __metadata:
     eslint: "npm:^9"
     eslint-config-next: "npm:^16.4.0"
     fast-xml-parser: "npm:^4.5.1"
+    https-proxy-agent: "npm:^7.0.6"
     idb: "npm:^8.0.2"
     keyv: "npm:^5.2.3"
     lucide-react: "npm:^0.469.0"

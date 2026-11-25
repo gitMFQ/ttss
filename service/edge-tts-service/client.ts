@@ -1,10 +1,93 @@
 import { concatArrayBuffers } from '../utils'
 import axios from 'axios'
+import { randomBytes } from 'node:crypto'
 import { WebSocket } from 'ws'
 import { generateSecMsGecV2 } from './drm'
 import { TRUSTED_CLIENT_TOKEN, CHROMIUM_FULL_VERSION, CHROMIUM_MAJOR_VERSION } from './drm-constants'
 
 export { CHROMIUM_FULL_VERSION, TRUSTED_CLIENT_TOKEN }
+
+// ---------------------------------------------------------------------------
+// Endpoint aggregation: v2 (api.msedgeservices.com) is preferred when it works,
+// v1 (speech.platform.bing.com) is the fallback. Both share the same protocol.
+// ---------------------------------------------------------------------------
+
+export interface EndpointConfig {
+    /** 日志与调试用名，如 'v1' / 'v2' */
+    name: string
+    /** 音色列表完整 URL（含鉴权 query） */
+    voicesUrl: string
+    /** WebSocket 基址（不含 query） */
+    wsBaseUrl: string
+    /** token 的 query 参数名：v1 用 TrustedClientToken，v2 用 Ocp-Apim-Subscription-Key */
+    tokenParamName: string
+    /** 握手 host 头 */
+    host: string
+}
+
+const EDGE_ENDPOINTS: EndpointConfig[] = [
+    {
+        name: 'v2',
+        voicesUrl: 'https://api.msedgeservices.com/tts/cognitiveservices/voices/list?Ocp-Apim-Subscription-Key=6A5AA1D4EAFF4E9FB37E23D68491D6F4',
+        wsBaseUrl: 'wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1',
+        tokenParamName: 'Ocp-Apim-Subscription-Key',
+        host: 'api.msedgeservices.com',
+    },
+    {
+        name: 'v1',
+        voicesUrl: 'https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4',
+        wsBaseUrl: 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1',
+        tokenParamName: 'TrustedClientToken',
+        host: 'speech.platform.bing.com',
+    },
+]
+
+function buildWsUrl(config: EndpointConfig, secMsGec: string, connectionId: string): string {
+    return `${config.wsBaseUrl}?${config.tokenParamName}=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=2-${CHROMIUM_FULL_VERSION}&ConnectionId=${connectionId}`
+}
+
+// 单次尝试（握手 + 合成）超时。
+const ATTEMPT_TIMEOUT_MS = 20000
+// 每个后端最多尝试次数：微软接口偶发 5xx/断连，重试一次能挡掉大部分抖动。
+const ATTEMPTS_PER_BACKEND = 2
+// 一次请求的总预算：超预算就不再重试，避免把函数拖到平台超时。
+const TOTAL_BUDGET_MS = 45000
+// 重试前的短暂等待，避免连续撞同一个故障节点。
+const RETRY_BACKOFF_MS = 300
+
+// 模块级偏好：音色列表和语音合成分开记忆上次走通的后端。
+let preferV2ForVoices = false
+let preferV2ForConvert = true
+
+function orderedEndpoints(preferV2: boolean): EndpointConfig[] {
+    return preferV2 ? EDGE_ENDPOINTS : [...EDGE_ENDPOINTS].reverse()
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+            setTimeout(() => reject(new Error(`${label} 超时 ${ms}ms`)), ms)
+        }),
+    ])
+}
+
+/** 把错误压缩成一行，方便在部署日志里检索。 */
+function describeError(error: unknown): string {
+    if (!(error instanceof Error)) {
+        return String(error)
+    }
+    const extra = ['code', 'statusCode', 'status']
+        .map((key) => (error as unknown as Record<string, unknown>)[key])
+        .filter((value) => value !== undefined)
+        .map((value) => ` ${value}`)
+        .join('')
+    return `${error.message}${extra}`
+}
 
 class MessageHeader {
     requestId: string
@@ -167,7 +250,7 @@ class ConnectionSlot {
     public alive = false
     public deadReason: string | null = null
 
-    constructor(public readonly index: number, private readonly cfg: PoolConfig, private readonly agent: any) {}
+    constructor(public readonly index: number, private readonly cfg: PoolConfig, private readonly agent: any, private readonly endpoint: EndpointConfig) {}
 
     private generateId(): string {
         const charset = 'abcdef0123456789'
@@ -179,15 +262,26 @@ class ConnectionSlot {
         return randomString
     }
 
+    /** 生成 32 位十六进制的 MUID，微软新版接口要求带上它。 */
+    private generateMuid(): string {
+        return randomBytes(16).toString('hex').toUpperCase()
+    }
+
     private async buildWebSocket(): Promise<WebSocket> {
         const connectionId = this.generateId()
         const secMsGec = generateSecMsGecV2(Date.now() / 1000)
-        const url = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=2-${CHROMIUM_FULL_VERSION}&ConnectionId=${connectionId}`
+        const url = buildWsUrl(this.endpoint, secMsGec, connectionId)
         const opts: any = {
-            host: 'speech.platform.bing.com',
+            host: this.endpoint.host,
             origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
+            handshakeTimeout: 12000,
             headers: {
                 'User-Agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROMIUM_MAJOR_VERSION}.0.0.0 Safari/537.36 Edg/${CHROMIUM_MAJOR_VERSION}.0.0.0`,
+                'Pragma': 'no-cache',
+                'Cache-Control': 'no-cache',
+                'Accept-Encoding': 'gzip, deflate, br, zstd',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Cookie': `muid=${this.generateMuid()};`,
             },
         }
         if (this.agent) opts.agent = this.agent
@@ -204,6 +298,13 @@ class ConnectionSlot {
                 ws.removeListener('error', onError)
                 resolve(ws)
             }
+            // 握手被拒（例如 403）时带上状态码，便于在部署日志里定位。
+            ws.on('unexpected-response', (_request: import('node:http').ClientRequest, response: import('node:http').IncomingMessage) => {
+                const error = new Error(`${this.endpoint.name} 握手被拒绝: HTTP ${response.statusCode}`)
+                response.resume()
+                ws.terminate()
+                reject(error)
+            })
             ws.once('open', onOpen)
             ws.once('error', onError)
         })
@@ -497,12 +598,12 @@ class ConnectionSlot {
 
 class EdgeTTSPool {
     private static instance: EdgeTTSPool | null = null
-    private slots: ConnectionSlot[] = []
+    private slotsByEndpoint = new Map<string, ConnectionSlot[]>()
+    private slotInits = new Map<string, Promise<ConnectionSlot[]>>()
+    private roundRobinIdx = new Map<string, number>()
     private cfg: PoolConfig
     private agent: any = undefined
     private agentReady: Promise<void> | null = null
-    private roundRobinIdx = 0
-    private initializing: Promise<void> | null = null
 
     private constructor() {
         this.cfg = loadPoolConfig()
@@ -529,18 +630,26 @@ class EdgeTTSPool {
         }
     }
 
-    private async ensureSlots(): Promise<void> {
-        if (this.agentReady) await this.agentReady
-        if (this.initializing) return this.initializing
-        this.initializing = (async () => {
-            for (let i = 0; i < this.cfg.poolSize; i++) {
-                this.slots.push(new ConnectionSlot(i, this.cfg, this.agent))
-            }
-        })().catch((e) => {
-            this.initializing = null
-            throw e
-        })
-        return this.initializing
+    private ensureSlots(endpoint: EndpointConfig): Promise<ConnectionSlot[]> {
+        const existing = this.slotsByEndpoint.get(endpoint.name)
+        if (existing && existing.length > 0) return Promise.resolve(existing)
+        let init = this.slotInits.get(endpoint.name)
+        if (!init) {
+            init = (async () => {
+                if (this.agentReady) await this.agentReady
+                const slots: ConnectionSlot[] = []
+                for (let i = 0; i < this.cfg.poolSize; i++) {
+                    slots.push(new ConnectionSlot(i, this.cfg, this.agent, endpoint))
+                }
+                this.slotsByEndpoint.set(endpoint.name, slots)
+                return slots
+            })().catch((e) => {
+                this.slotInits.delete(endpoint.name)
+                throw e
+            })
+            this.slotInits.set(endpoint.name, init)
+        }
+        return init
     }
 
     /**
@@ -548,11 +657,12 @@ class EdgeTTSPool {
      * so concurrent callers rebuild different sockets instead of stampeding
      * the same one.
      */
-    private pickSlot(): ConnectionSlot {
-        const alive = this.slots.filter((s) => s.alive)
+    private pickSlot(slots: ConnectionSlot[], name: string): ConnectionSlot {
+        const alive = slots.filter((s) => s.alive)
         if (alive.length === 0) {
-            const slot = this.slots[this.roundRobinIdx % this.slots.length]
-            this.roundRobinIdx = (this.roundRobinIdx + 1) % this.slots.length
+            const idx = this.roundRobinIdx.get(name) ?? 0
+            const slot = slots[idx % slots.length]
+            this.roundRobinIdx.set(name, (idx + 1) % slots.length)
             return slot
         }
         let best = alive[0]
@@ -562,15 +672,18 @@ class EdgeTTSPool {
         return best
     }
 
-    async convert(ssml: string, options: ClientOptions): Promise<ConvertResult> {
-        await this.ensureSlots()
-        const slot = this.pickSlot()
+    async convertWith(endpoint: EndpointConfig, ssml: string, options: ClientOptions): Promise<ConvertResult> {
+        const slots = await this.ensureSlots(endpoint)
+        const slot = this.pickSlot(slots, endpoint.name)
         return slot.submit(ssml, options, this.cfg.perRequestTimeoutMs)
     }
 
     shutdown() {
-        for (const s of this.slots) s.shutdown()
-        this.slots = []
+        for (const slots of this.slotsByEndpoint.values()) {
+            for (const s of slots) s.shutdown()
+        }
+        this.slotsByEndpoint.clear()
+        this.slotInits.clear()
     }
 }
 
@@ -582,15 +695,55 @@ export class EdgeTTSClient {
     private constructor() {
     }
     public static async voices(): Promise<unknown> {
-        const url = 'https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4'
-        const response = await axios.get(url)
-        const data = response.data
-        return data
+        let lastError: unknown = null
+        for (const endpoint of orderedEndpoints(preferV2ForVoices)) {
+            try {
+                const task = axios.get(endpoint.voicesUrl)
+                const response = await withTimeout(task, ATTEMPT_TIMEOUT_MS, `voices() via ${endpoint.name}`)
+                preferV2ForVoices = endpoint.name === 'v2'
+                const data = response.data
+                console.log(`[edge-tts] voices ok via ${endpoint.name} count=${Array.isArray(data) ? data.length : 'unknown'}`)
+                return data
+            } catch (error) {
+                lastError = error
+                console.error(`[edge-tts] voices fail via ${endpoint.name}: ${describeError(error)}`)
+            }
+        }
+        throw lastError
     }
 
     public static async convert(ssml: string, options: ClientOptions): Promise<ConvertResult> {
-        console.log('[EdgeTTSClient] convert (pooled)', { format: options.format, ssmlLen: ssml.length })
-        return EdgeTTSPool.get().convert(ssml, options)
+        const startedAt = Date.now()
+        let lastError: unknown = null
+        let attempts = 0
+        backends:
+        for (const endpoint of orderedEndpoints(preferV2ForConvert)) {
+            for (let attempt = 1; attempt <= ATTEMPTS_PER_BACKEND; attempt++) {
+                const spent = Date.now() - startedAt
+                if (spent >= TOTAL_BUDGET_MS) {
+                    console.error(`[edge-tts] 放弃重试，已耗时 ${spent}ms（预算 ${TOTAL_BUDGET_MS}ms）`)
+                    break backends
+                }
+                attempts++
+                try {
+                    const task = EdgeTTSPool.get().convertWith(endpoint, ssml, options)
+                    const result = await withTimeout(
+                        task,
+                        Math.min(ATTEMPT_TIMEOUT_MS, TOTAL_BUDGET_MS - spent),
+                        `convert() via ${endpoint.name}`,
+                    )
+                    preferV2ForConvert = endpoint.name === 'v2'
+                    console.log(`[edge-tts] synth ok via ${endpoint.name} attempt=${attempt} bytes=${result.audio.byteLength} ms=${Date.now() - startedAt}`)
+                    return result
+                } catch (error) {
+                    lastError = error
+                    console.error(`[edge-tts] synth fail via ${endpoint.name} attempt=${attempt} after ${Date.now() - startedAt}ms: ${describeError(error)}`)
+                    await sleep(RETRY_BACKOFF_MS)
+                }
+            }
+        }
+        console.error(`[edge-tts] synth exhausted after ${attempts} attempts / ${Date.now() - startedAt}ms`)
+        throw lastError
     }
 }
 
