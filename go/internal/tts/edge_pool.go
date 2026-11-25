@@ -75,6 +75,7 @@ func (t *edgeTask) deliver(r edgeTaskResult) {
 // upstream behaviour where the server processes requests in order.
 type edgeSlot struct {
 	index        int
+	endpoint     edgeEndpoint
 	dialer       *websocketDialer
 	pingInterval time.Duration
 	turnTimeout  time.Duration
@@ -87,9 +88,10 @@ type edgeSlot struct {
 	closing    bool
 }
 
-func newEdgeSlot(index int, dialer *websocketDialer, cfg edgePoolConfig) *edgeSlot {
+func newEdgeSlot(index int, endpoint edgeEndpoint, dialer *websocketDialer, cfg edgePoolConfig) *edgeSlot {
 	return &edgeSlot{
 		index:        index,
+		endpoint:     endpoint,
 		dialer:       dialer,
 		pingInterval: cfg.pingInterval,
 		turnTimeout:  cfg.turnTimeout,
@@ -150,7 +152,7 @@ func (s *edgeSlot) openConn() bool {
 		s.conn.close()
 		s.conn = nil
 	}
-	ws, err := s.dialer.dialEdge()
+	ws, err := s.dialer.dialEdge(s.endpoint)
 	if err != nil {
 		return false
 	}
@@ -301,14 +303,15 @@ func (s *edgeSlot) stats() (alive bool, queued int) {
 // Pool
 // ---------------------------------------------------------------------------
 
-// edgePool maintains a fixed number of slots and dispatches incoming turns to
-// the slot with the smallest queue.
+// edgePool maintains a fixed number of slots for one endpoint and dispatches
+// incoming turns to the slot with the smallest queue.
 type edgePool struct {
-	mu      sync.Mutex
-	slots   []*edgeSlot
-	dialer  *websocketDialer
-	cfg     edgePoolConfig
-	closing bool
+	mu       sync.Mutex
+	endpoint edgeEndpoint
+	slots    []*edgeSlot
+	dialer   *websocketDialer
+	cfg      edgePoolConfig
+	closing  bool
 
 	initOnce sync.Once
 	initErr  error
@@ -339,7 +342,7 @@ func (c edgePoolConfig) proxyURL() *url.URL {
 	return u
 }
 
-func newEdgePool(dialer *websocketDialer, cfg edgePoolConfig) *edgePool {
+func newEdgePool(endpoint edgeEndpoint, dialer *websocketDialer, cfg edgePoolConfig) *edgePool {
 	if cfg.poolSize < 1 {
 		cfg.poolSize = 3
 	}
@@ -353,9 +356,10 @@ func newEdgePool(dialer *websocketDialer, cfg edgePoolConfig) *edgePool {
 		cfg.pingInterval = 30 * time.Second
 	}
 	return &edgePool{
-		dialer: dialer,
-		cfg:    cfg,
-		stop:   make(chan struct{}),
+		endpoint: endpoint,
+		dialer:   dialer,
+		cfg:      cfg,
+		stop:     make(chan struct{}),
 	}
 }
 
@@ -368,7 +372,7 @@ func (p *edgePool) ensureInit() error {
 		}
 		slots := make([]*edgeSlot, 0, p.cfg.poolSize)
 		for i := 0; i < p.cfg.poolSize; i++ {
-			slots = append(slots, newEdgeSlot(i, p.dialer, p.cfg))
+			slots = append(slots, newEdgeSlot(i, p.endpoint, p.dialer, p.cfg))
 		}
 		p.mu.Lock()
 		p.slots = slots

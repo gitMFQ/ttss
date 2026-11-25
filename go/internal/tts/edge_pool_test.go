@@ -115,12 +115,12 @@ func newTestPool(t *testing.T, f *fakeEdge, cfg edgePoolConfig) *edgePool {
 	t.Helper()
 	dialer := &websocketDialer{
 		handshakeTO: 5 * time.Second,
-		dialEdgeOverride: func() (*websocket.Conn, error) {
+		dialEdgeOverride: func(endpoint edgeEndpoint) (*websocket.Conn, error) {
 			conn, _, err := websocket.DefaultDialer.Dial(f.url(), nil)
 			return conn, err
 		},
 	}
-	return newEdgePool(dialer, cfg)
+	return newEdgePool(edgeEndpoints[1], dialer, cfg)
 }
 
 func submitText(t *testing.T, pool *edgePool, text string) ([]byte, error) {

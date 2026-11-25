@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -30,7 +29,7 @@ type websocketDialer struct {
 
 	// dialEdgeOverride is a test seam: when set, dialEdge returns its result
 	// instead of opening a real connection.
-	dialEdgeOverride func() (*websocket.Conn, error)
+	dialEdgeOverride func(endpoint edgeEndpoint) (*websocket.Conn, error)
 }
 
 type proxyConfig struct {
@@ -99,9 +98,9 @@ func parseProxyURL(raw string) (*proxyConfig, error) {
 	return cfg, nil
 }
 
-func (d *websocketDialer) dialEdge() (*websocket.Conn, error) {
+func (d *websocketDialer) dialEdge(endpoint edgeEndpoint) (*websocket.Conn, error) {
 	if d.dialEdgeOverride != nil {
-		return d.dialEdgeOverride()
+		return d.dialEdgeOverride(endpoint)
 	}
 	connectionID, err := randomHex(16)
 	if err != nil {
@@ -111,28 +110,23 @@ func (d *websocketDialer) dialEdge() (*websocket.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("generate Sec-MS-GEC token: %w", err)
 	}
-	const targetHost = "speech.platform.bing.com"
-	const targetPort = "443"
 
 	if d.proxy != nil {
-		return d.dialViaProxy(connectionID, secMSGEC, targetHost, targetPort)
+		return d.dialViaProxy(endpoint, connectionID, secMSGEC)
 	}
-	return d.dialDirect(connectionID, secMSGEC)
+	return d.dialDirect(endpoint, connectionID, secMSGEC)
 }
 
-func (d *websocketDialer) dialDirect(connectionID, secMSGEC string) (*websocket.Conn, error) {
-	u := buildEdgeWSURL(connectionID, secMSGEC)
+func (d *websocketDialer) dialDirect(endpoint edgeEndpoint, connectionID, secMSGEC string) (*websocket.Conn, error) {
+	u := buildEdgeWSURL(endpoint, connectionID, secMSGEC)
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = d.handshakeTO
-	header := http.Header{}
-	header.Set("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
-	header.Set("User-Agent", edgeUserAgent)
-	conn, resp, err := dialer.Dial(u.String(), header)
+	conn, resp, err := dialer.Dial(u.String(), edgeHandshakeHeaders(endpoint.host))
 	if err != nil {
 		if resp != nil {
-			return nil, fmt.Errorf("connect Edge TTS: %w (HTTP %d)", err, resp.StatusCode)
+			return nil, fmt.Errorf("connect Edge TTS via %s: %w (HTTP %d)", endpoint.name, err, resp.StatusCode)
 		}
-		return nil, fmt.Errorf("connect Edge TTS: %w", err)
+		return nil, fmt.Errorf("connect Edge TTS via %s: %w", endpoint.name, err)
 	}
 	conn.SetReadLimit(d.maxFrameSize)
 	return conn, nil
@@ -141,16 +135,17 @@ func (d *websocketDialer) dialDirect(connectionID, secMSGEC string) (*websocket.
 // dialViaProxy opens a TCP connection to the proxy, sends HTTP CONNECT,
 // performs TLS over the tunneled socket, then runs the WebSocket upgrade.
 // We implement this by hand to avoid pulling in golang.org/x/net/proxy.
-func (d *websocketDialer) dialViaProxy(connectionID, secMSGEC, targetHost, targetPort string) (*websocket.Conn, error) {
+func (d *websocketDialer) dialViaProxy(endpoint edgeEndpoint, connectionID, secMSGEC string) (*websocket.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), d.handshakeTO)
 	defer cancel()
 
+	const targetPort = "443"
 	rawConn, err := (&net.Dialer{Timeout: d.handshakeTO}).DialContext(ctx, "tcp", net.JoinHostPort(d.proxy.host, d.proxy.port))
 	if err != nil {
 		return nil, fmt.Errorf("connect proxy %s:%s: %w", d.proxy.host, d.proxy.port, err)
 	}
 
-	connectReq := fmt.Sprintf("CONNECT %s:%s HTTP/1.1\r\nHost: %s:%s\r\n", targetHost, targetPort, targetHost, targetPort)
+	connectReq := fmt.Sprintf("CONNECT %s:%s HTTP/1.1\r\nHost: %s:%s\r\n", endpoint.host, targetPort, endpoint.host, targetPort)
 	if d.proxy.username != "" {
 		connectReq += "Proxy-Authorization: Basic " + basicAuth(d.proxy.username, d.proxy.password) + "\r\n"
 	}
@@ -182,7 +177,7 @@ func (d *websocketDialer) dialViaProxy(connectionID, secMSGEC, targetHost, targe
 	}
 
 	tlsConn := tls.Client(&prefixReader{r: br, conn: rawConn}, &tls.Config{
-		ServerName: targetHost,
+		ServerName: endpoint.host,
 		MinVersion: tls.VersionTLS12,
 	})
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
@@ -190,16 +185,13 @@ func (d *websocketDialer) dialViaProxy(connectionID, secMSGEC, targetHost, targe
 		return nil, fmt.Errorf("TLS handshake via proxy: %w", err)
 	}
 
-	u := buildEdgeWSURL(connectionID, secMSGEC)
+	u := buildEdgeWSURL(endpoint, connectionID, secMSGEC)
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = d.handshakeTO
 	// NetDialTLSContext tells gorilla the TLS handshake is already done, so it
 	// will not try to run a second one over our tunnel.
 	dialer.NetDialTLSContext = func(context.Context, string, string) (net.Conn, error) { return tlsConn, nil }
-	header := http.Header{}
-	header.Set("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
-	header.Set("User-Agent", edgeUserAgent)
-	conn, resp, err := dialer.Dial(u.String(), header)
+	conn, resp, err := dialer.Dial(u.String(), edgeHandshakeHeaders(endpoint.host))
 	if err != nil {
 		tlsConn.Close()
 		if resp != nil {
@@ -231,19 +223,35 @@ func basicAuth(user, password string) string {
 	return base64.StdEncoding.EncodeToString([]byte(user + ":" + password))
 }
 
-func buildEdgeWSURL(connectionID, secMSGEC string) url.URL {
-	u := url.URL{
-		Scheme: "wss",
-		Host:   "speech.platform.bing.com",
-		Path:   "/consumer/speech/synthesize/readaloud/edge/v1",
+func buildEdgeWSURL(endpoint edgeEndpoint, connectionID, secMSGEC string) url.URL {
+	u, err := url.Parse(endpoint.wsBaseURL)
+	if err != nil {
+		// The endpoint table is a compile-time constant, so a parse failure here
+		// is a programmer error. Fall back to the v1 base and let the dial fail
+		// loudly at connection time.
+		u, _ = url.Parse(edgeEndpoints[1].wsBaseURL)
 	}
 	q := u.Query()
-	q.Set("TrustedClientToken", trustedClientToken)
+	q.Set(endpoint.tokenParamName, trustedClientToken)
 	q.Set("Sec-MS-GEC", secMSGEC)
 	q.Set("Sec-MS-GEC-Version", secMSGECVersion)
 	q.Set("ConnectionId", connectionID)
 	u.RawQuery = q.Encode()
-	return u
+	return *u
+}
+
+// edgeHandshakeHeaders builds the headers shared by direct and proxied dials.
+func edgeHandshakeHeaders(host string) http.Header {
+	header := http.Header{}
+	header.Set("Host", host)
+	header.Set("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
+	header.Set("User-Agent", edgeUserAgent)
+	header.Set("Pragma", "no-cache")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+	header.Set("Accept-Language", "en-US,en;q=0.9")
+	header.Set("Cookie", "muid="+newMuid()+";")
+	return header
 }
 
 // ---------------------------------------------------------------------------
@@ -470,9 +478,8 @@ func (c *edgeConn) handleTextFrame(message []byte) {
 	if !ok {
 		return
 	}
-	if len(turn.audio) == 0 {
-		turn.finish(edgeTaskResult{err: errors.New("Edge TTS returned empty audio")})
-		return
-	}
+	// A turn.end with no audio is a *successful* empty synthesis: upstream
+	// answers punctuation-only text this way. The service layer decides
+	// whether to substitute a silent MP3.
 	turn.finish(edgeTaskResult{audio: turn.audio})
 }

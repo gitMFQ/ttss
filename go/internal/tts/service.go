@@ -18,9 +18,11 @@ type Service struct {
 	voiceClient *http.Client
 	translator  *translatorClient
 
-	poolMu   sync.Mutex
-	edgePool *edgePool
-	closed   atomic.Bool
+	poolMu       sync.Mutex
+	edgePools    map[string]*edgePool
+	preferV2Conv atomic.Bool
+	preferV2Voic atomic.Bool
+	closed       atomic.Bool
 
 	cfg        edgePoolConfig
 	cacheMu    sync.Mutex
@@ -48,8 +50,13 @@ func NewServiceWithDialer(dialer *websocketDialer) *Service {
 		translator:  &translatorClient{httpClient: client},
 		cfg:         cfg,
 		voiceCache:  make(map[string]voiceCacheEntry),
+		edgePools:   make(map[string]*edgePool),
 	}
-	s.edgePool = newEdgePool(dialer, cfg)
+	for _, endpoint := range edgeEndpoints {
+		s.edgePools[endpoint.name] = newEdgePool(endpoint, dialer, cfg)
+	}
+	// Default to v2 for synthesis, matching the Next.js implementation.
+	s.preferV2Conv.Store(true)
 	return s
 }
 
@@ -101,11 +108,44 @@ func poolConfigFromEnv() edgePoolConfig {
 	return cfg
 }
 
-// pool returns the current pool, or nil after Close.
-func (s *Service) pool() *edgePool {
+// pool returns the pool for one endpoint, or nil after Close.
+func (s *Service) pool(endpoint edgeEndpoint) *edgePool {
 	s.poolMu.Lock()
 	defer s.poolMu.Unlock()
-	return s.edgePool
+	return s.edgePools[endpoint.name]
+}
+
+// edgeVoicesEndpoints orders the voice-list endpoints by the last healthy
+// backend, without writing back the preference (it is recorded only when a
+// fetch actually succeeds).
+func (s *Service) edgeVoicesEndpoints() []edgeEndpoint {
+	preferV2 := s.preferV2Voic.Load()
+	if preferV2 {
+		return edgeEndpoints
+	}
+	return []edgeEndpoint{edgeEndpoints[1], edgeEndpoints[0]}
+}
+
+// edgeConvertEndpoints orders the synthesis endpoints by the last healthy
+// backend.
+func (s *Service) edgeConvertEndpoints() []edgeEndpoint {
+	preferV2 := s.preferV2Conv.Load()
+	if preferV2 {
+		return edgeEndpoints
+	}
+	return []edgeEndpoint{edgeEndpoints[1], edgeEndpoints[0]}
+}
+
+// noteEdgeBackend records which endpoint answered last for the given traffic
+// kind (voices vs convert).
+func (s *Service) noteEdgeBackend(endpoint edgeEndpoint, ok bool) {
+	if ok {
+		if endpoint.name == "v2" {
+			s.preferV2Conv.Store(true)
+		} else {
+			s.preferV2Conv.Store(false)
+		}
+	}
 }
 
 func (s *Service) turnTimeout() time.Duration {
@@ -119,10 +159,10 @@ func (s *Service) Close() {
 		return
 	}
 	s.poolMu.Lock()
-	pool := s.edgePool
-	s.edgePool = nil
+	pools := s.edgePools
+	s.edgePools = nil
 	s.poolMu.Unlock()
-	if pool != nil {
+	for _, pool := range pools {
 		pool.shutdown()
 	}
 }
@@ -179,7 +219,20 @@ func (s *Service) Convert(ctx context.Context, service, text string, options Opt
 	}
 	if canonical == "edge" {
 		speech, err := s.edgeSynthesize(ctx, text, options)
-		return speech, "audio/mpeg", err
+		if err != nil {
+			return nil, "", err
+		}
+		if len(speech) == 0 {
+			// Microsoft answers "no speakable content" (pure punctuation or
+			// symbols) with turn.end and no audio. Returning an empty body makes
+			// clients such as Legado count it as an error, so substitute a short
+			// legal silent MP3.
+			if !hasSpeakableText(text) {
+				return silentMP3Audio(), "audio/mpeg", nil
+			}
+			return nil, "", fmt.Errorf("Edge TTS returned empty audio")
+		}
+		return speech, "audio/mpeg", nil
 	}
 	voices, err := s.ListVoices(ctx, "ms")
 	if err != nil {
@@ -196,15 +249,26 @@ func (s *Service) Convert(ctx context.Context, service, text string, options Opt
 // EdgePoolStats exposes pool state for diagnostics. The proxy URL is redacted
 // so credentials embedded in it never leak through an API surface.
 func (s *Service) EdgePoolStats() map[string]any {
-	pool := s.pool()
-	if pool == nil {
+	s.poolMu.Lock()
+	pools := make(map[string]*edgePool, len(s.edgePools))
+	for name, pool := range s.edgePools {
+		pools[name] = pool
+	}
+	s.poolMu.Unlock()
+	if len(pools) == 0 {
 		return nil
 	}
-	st := pool.stats()
+	perBackend := make(map[string]any, len(pools))
+	for name, pool := range pools {
+		st := pool.stats()
+		perBackend[name] = map[string]any{
+			"slots":  st.slots,
+			"alive":  st.aliveSlots,
+			"queued": st.totalQueued,
+		}
+	}
 	return map[string]any{
-		"slots":    st.slots,
-		"alive":    st.aliveSlots,
-		"queued":   st.totalQueued,
+		"backends": perBackend,
 		"proxy":    redactProxy(pickProxyEnv()),
 		"poolSize": s.cfg.poolSize,
 	}

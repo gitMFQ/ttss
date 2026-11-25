@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -21,16 +20,55 @@ const (
 	trustedClientToken = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
 	// chromiumVersion tracks the version upstream edge-tts ships. Claiming a major
 	// newer than what Microsoft has deployed can trip fingerprint checks.
-	chromiumVersion = "143.0.3650.75"
-	chromiumMajor   = "143"
+	chromiumVersion = "144.0.3719.82"
+	chromiumMajor   = "144"
 	// secMSGECVersion must carry the v2 prefix: the older v1 token format is now
 	// rejected with HTTP 403 during the WebSocket handshake.
 	secMSGECVersion = "2-" + chromiumVersion
-	voicesListURL   = "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list"
 	// edgeUserAgent presents as desktop Edge, matching upstream edge-tts headers.
 	edgeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" +
 		chromiumMajor + ".0.0.0 Safari/537.36 Edg/" + chromiumMajor + ".0.0.0"
 )
+
+// edgeEndpoint describes one Edge TTS backend. Both endpoints speak the same
+// WebSocket protocol; only the host and the auth query parameter differ.
+type edgeEndpoint struct {
+	name string
+	// voicesURL is the voice list endpoint including its auth query.
+	voicesURL string
+	// wsBaseURL is the WebSocket base (no query).
+	wsBaseURL string
+	// tokenParamName is the auth query key: v1 uses TrustedClientToken,
+	// v2 uses Ocp-Apim-Subscription-Key.
+	tokenParamName string
+	// host is sent as the Host header and used for TLS/SNI and CONNECT.
+	host string
+}
+
+var edgeEndpoints = []edgeEndpoint{
+	{
+		name:           "v2",
+		voicesURL:      "https://api.msedgeservices.com/tts/cognitiveservices/voices/list?Ocp-Apim-Subscription-Key=" + trustedClientToken,
+		wsBaseURL:      "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1",
+		tokenParamName: "Ocp-Apim-Subscription-Key",
+		host:           "api.msedgeservices.com",
+	},
+	{
+		name:           "v1",
+		voicesURL:      "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=" + trustedClientToken,
+		wsBaseURL:      "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1",
+		tokenParamName: "TrustedClientToken",
+		host:           "speech.platform.bing.com",
+	},
+}
+
+// attemptBudget limits one synthesis request across all retries. Retrying
+// inside the slot (connection lost before answer) is cheaper and not counted
+// here; only fresh backend attempts consume this budget.
+const edgeAttemptBudget = 45 * time.Second
+
+// retryBackoff pauses briefly between backend attempts.
+const retryBackoff = 300 * time.Millisecond
 
 type edgeVoice struct {
 	Name           string `json:"Name"`
@@ -44,22 +82,32 @@ type edgeVoice struct {
 }
 
 func (s *Service) fetchEdgeVoices(ctx context.Context) ([]Voice, error) {
-	u, _ := url.Parse(voicesListURL)
-	q := u.Query()
-	q.Set("trustedclienttoken", trustedClientToken)
-	u.RawQuery = q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	var lastErr error
+	for _, endpoint := range s.edgeVoicesEndpoints() {
+		voices, err := fetchEdgeVoicesFrom(ctx, s.voiceClient, endpoint)
+		if err == nil {
+			s.preferV2Voic.Store(endpoint.name == "v2")
+			return voices, nil
+		}
+		lastErr = err
+		fmt.Printf("[edge-tts] voices fail via %s: %v\n", endpoint.name, err)
+	}
+	return nil, lastErr
+}
+
+func fetchEdgeVoicesFrom(ctx context.Context, client *http.Client, endpoint edgeEndpoint) ([]Voice, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.voicesURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; MS Read Aloud Forwarder)")
-	resp, err := s.voiceClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch Edge voices: %w", err)
+		return nil, fmt.Errorf("fetch Edge voices via %s: %w", endpoint.name, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, upstreamError("fetch Edge voices", resp)
+		return nil, upstreamError("fetch Edge voices via "+endpoint.name, resp)
 	}
 	var entries []edgeVoice
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&entries); err != nil {
@@ -75,12 +123,35 @@ func (s *Service) fetchEdgeVoices(ctx context.Context) ([]Voice, error) {
 	return voices, nil
 }
 
-// edgeSynthesize submits a turn to the shared connection pool. The pool keeps
-// a small set of long-lived WebSockets open and pipelines multiple turns onto
-// whichever slot has the smallest queue, cutting the per-request handshake
-// overhead (1+ seconds per cold connection).
+// edgeSynthesize submits a turn to the shared connection pool with v2-first
+// backend aggregation: a failed attempt on one endpoint is retried on the
+// other, and the last healthy backend is remembered for future requests.
 func (s *Service) edgeSynthesize(ctx context.Context, text string, options Options) ([]byte, error) {
-	pool := s.pool()
+	startedAt := time.Now()
+	var lastErr error
+	for _, endpoint := range s.edgeConvertEndpoints() {
+		if spent := time.Since(startedAt); spent >= edgeAttemptBudget {
+			break
+		}
+		audio, err := s.edgeSynthesizeOnce(ctx, endpoint, text, options)
+		if err == nil {
+			s.noteEdgeBackend(endpoint, true)
+			fmt.Printf("[edge-tts] synth ok via %s bytes=%d ms=%d\n", endpoint.name, len(audio), time.Since(startedAt).Milliseconds())
+			return audio, nil
+		}
+		lastErr = err
+		s.noteEdgeBackend(endpoint, false)
+		fmt.Printf("[edge-tts] synth fail via %s after %dms: %v\n", endpoint.name, time.Since(startedAt).Milliseconds(), err)
+		time.Sleep(retryBackoff)
+	}
+	return nil, fmt.Errorf("Edge TTS exhausted all backends: %w", lastErr)
+}
+
+// edgeSynthesizeOnce runs one turn through the endpoint's slot pool. The
+// caller's context is capped here so queue wait + synthesis cannot pin an HTTP
+// handler forever.
+func (s *Service) edgeSynthesizeOnce(ctx context.Context, endpoint edgeEndpoint, text string, options Options) ([]byte, error) {
+	pool := s.pool(endpoint)
 	if pool == nil {
 		return nil, errEdgeNoDialer
 	}
@@ -88,8 +159,6 @@ func (s *Service) edgeSynthesize(ctx context.Context, text string, options Optio
 	if err != nil {
 		return nil, err
 	}
-	// Give the whole request (queue wait included) a hard ceiling so a stalled
-	// upstream can never pin an HTTP handler forever.
 	ctx, cancel := context.WithTimeout(ctx, s.turnTimeout())
 	defer cancel()
 
@@ -115,6 +184,17 @@ func randomHex(n int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(data), nil
+}
+
+// newMuid returns an uppercase 32-hex MUID for the Edge handshake Cookie.
+// The upstream client regenerates one per socket; failures fall back to a
+// zero MUID rather than aborting the dial.
+func newMuid() string {
+	raw, err := randomHex(16)
+	if err != nil {
+		return "00000000000000000000000000000000"
+	}
+	return strings.ToUpper(raw)
 }
 
 func edgeTimestamp() string {
