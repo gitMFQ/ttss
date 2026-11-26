@@ -292,6 +292,18 @@ curl -H "Authorization: Bearer mySecret123" \
 
 > 💡 以上变量在 Go 版本里同样生效，变量名一致。
 
+### Go 版命令行参数
+
+Go 二进制同时支持以下参数，优先级高于对应环境变量：
+
+```bash
+./ttss -addr 127.0.0.1:8080    # 监听地址（对应 ADDR，默认 :3000）
+./ttss -port 8080              # 仅改端口，host 取 -addr 的 host
+./ttss -token mySecret123      # 访问令牌（对应 MS_RA_FORWARDER_TOKEN/TOKEN）
+./ttss -public-url https://你的域名  # 公网地址（对应 PUBLIC_BASE_URL）
+./ttss -edge-endpoint v1       # 默认 Edge 端点（对应 EDGE_ENDPOINT）
+```
+
 ## Edge TTS 连接复用与 v2/v1 双端点
 
 WebSocket 握手是 Edge TTS 最大的延迟来源。为减少该开销，本服务内部维护长连接池，并同时支持微软两个 Edge TTS 端点：
