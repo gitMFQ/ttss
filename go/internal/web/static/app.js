@@ -19,12 +19,14 @@
   function friendlyVoice(voice) { const short = voiceShortName(voice.value); return friendlyVoices[short] || voice.label || short; }
   function selectedVoice() { return state.voices.find(v => v.value === $('voice').value); }
   function currentService() { return $('service').value || 'edge'; }
+  function currentEdgeEndpoint() { return $('edge-endpoint')?.value || ''; }
 
   async function init() {
     $('text').value ||= defaultText;
     $('text').addEventListener('input', updateCharCount);
     $('service').addEventListener('change', () => {
       $('voice-filter').value = ''; $('omni').checked = false; $('personality').value = ''; $('role').value = 'default'; $('lang-skill').value = '';
+      $('edge-endpoint-field').classList.toggle('hidden', currentService() !== 'edge');
       loadVoices(true);
     });
     $('locale').addEventListener('change', () => populateVoices(false));
@@ -43,6 +45,7 @@
     $('logout-button').addEventListener('click', logout);
     $('login-form').addEventListener('submit', login);
     $('service').value = 'edge';
+    $('edge-endpoint-field').classList.toggle('hidden', false);
     updateCharCount();
     openHistory().catch(() => {});
     const response = await fetch('/api/config');
@@ -67,7 +70,7 @@
 
   function logout() { localStorage.removeItem('auth_token'); state.token = ''; setLoginView(true); $('login-token').value = ''; }
   function enterApp() {
-    setLoginView(false); $('logout-button').classList.toggle('hidden', !state.authRequired); loadVoices(false);
+    setLoginView(false); $('logout-button').classList.toggle('hidden', !state.authRequired); $('edge-endpoint-field').classList.toggle('hidden', currentService() !== 'edge'); loadVoices(false);
   }
 
   async function loadVoices(reset) {
@@ -138,6 +141,8 @@
     const service = currentService();
     const options = { voice:$('voice').value, rate:Number($('rate').value), pitch:Number($('pitch').value), volume:Number($('volume').value) };
     const personality = $('personality').value;
+    const edgeEndpoint = currentEdgeEndpoint();
+    if (service === 'edge' && edgeEndpoint) options.edge_endpoint = edgeEndpoint;
     if (personality) options.personality = personality;
     if (service === 'ms') Object.assign(options, {
       safeMode:$('safe-mode').checked, omni:$('omni').checked, region:$('region').value, format:$('format').value,

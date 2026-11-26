@@ -24,6 +24,10 @@ type Service struct {
 	preferV2Voic atomic.Bool
 	closed       atomic.Bool
 
+	// defaultEdgeEndpoint pins Edge synthesis to v1 or v2 when set (from the
+	// EDGE_ENDPOINT env var); zero value keeps the automatic v2-first fallback.
+	defaultEdgeEndpoint edgeEndpoint
+
 	cfg        edgePoolConfig
 	cacheMu    sync.Mutex
 	voiceCache map[string]voiceCacheEntry
@@ -36,8 +40,18 @@ type voiceCacheEntry struct {
 
 // NewService constructs a service with a default HTTP client and the standard
 // WebSocket dialer (which honours TTS_PROXY / HTTPS_PROXY / HTTP_PROXY).
+// The EDGE_ENDPOINT environment variable (v1 or v2) may pin the default
+// synthesis endpoint; an empty value keeps v2-first automatic fallback.
 func NewService() *Service {
 	return NewServiceWithDialer(newWebsocketDialer())
+}
+
+// SetDefaultEdgeEndpoint pins the default Edge endpoint (v1 or v2). Invalid or
+// empty values are ignored, preserving the automatic fallback.
+func (s *Service) SetDefaultEdgeEndpoint(value string) {
+	if endpoint, ok := edgeEndpointByName(value); ok {
+		s.defaultEdgeEndpoint = endpoint
+	}
 }
 
 // NewServiceWithDialer lets callers inject a custom dialer (useful for tests).
@@ -54,6 +68,10 @@ func NewServiceWithDialer(dialer *websocketDialer) *Service {
 	}
 	for _, endpoint := range edgeEndpoints {
 		s.edgePools[endpoint.name] = newEdgePool(endpoint, dialer, cfg)
+	}
+	if endpoint, ok := edgeEndpointByName(os.Getenv("EDGE_ENDPOINT")); ok {
+		s.defaultEdgeEndpoint = endpoint
+		fmt.Printf("[EdgeTTS] default endpoint from EDGE_ENDPOINT=%s\n", endpoint.name)
 	}
 	// Default to v2 for synthesis, matching the Next.js implementation.
 	s.preferV2Conv.Store(true)

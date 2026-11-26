@@ -145,6 +145,8 @@ func (s *Service) edgeSynthesize(ctx context.Context, text string, options Optio
 	endpoints := s.edgeConvertEndpoints()
 	if pinned, ok := edgeEndpointByName(options.EdgeEndpoint); ok {
 		endpoints = []edgeEndpoint{pinned}
+	} else if s.defaultEdgeEndpoint.name != "" {
+		endpoints = []edgeEndpoint{s.defaultEdgeEndpoint}
 	}
 	for _, endpoint := range endpoints {
 		if spent := time.Since(startedAt); spent >= edgeAttemptBudget {

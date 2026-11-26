@@ -284,6 +284,7 @@ curl -H "Authorization: Bearer mySecret123" \
 | `TTS_PROXY` | 否 | HTTP 代理，例如 `http://127.0.0.1:7890`，用于让 Edge TTS 的 WebSocket 通过 HTTP CONNECT 隧道出站。优先级最高；留空则直连 |
 | `HTTPS_PROXY` | 否 | 同上，仅在未设置 `TTS_PROXY` 时生效 |
 | `HTTP_PROXY` | 否 | 同上，仅在未设置 `TTS_PROXY` 和 `HTTPS_PROXY` 时生效 |
+| `EDGE_ENDPOINT` | 否 | 默认 Edge 端点：`v1` 或 `v2`；留空按 v2 优先自动回退（Go 版也可用 `-edge-endpoint` 参数覆盖） |
 | `TTS_POOL_SIZE` | 否 | 维持多少个长连接，默认 `3`。并发请求量较大时可调到 5–10 |
 | `TTS_IDLE_TIMEOUT_MIN` | 否 | 连接空闲多久后主动关闭（分钟），默认 `5` |
 | `TTS_TURN_TIMEOUT_SEC` | 否 | 单个合成请求的总超时（秒，含排队时间），默认 `60` |

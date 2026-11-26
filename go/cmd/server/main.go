@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -25,8 +26,14 @@ func main() {
 	}
 	publicURL := os.Getenv("PUBLIC_BASE_URL")
 
+	// -edge-endpoint overrides EDGE_ENDPOINT; both pin the default Edge
+	// synthesis endpoint. Empty or invalid keeps v2-first automatic fallback.
+	edgeEndpointFlag := flag.String("edge-endpoint", os.Getenv("EDGE_ENDPOINT"), "default Edge TTS endpoint: v1 or v2 (empty = v2-first automatic fallback)")
+	flag.Parse()
+
 	speech := tts.NewService()
 	defer speech.Close()
+	speech.SetDefaultEdgeEndpoint(*edgeEndpointFlag)
 
 	server := &http.Server{
 		Addr:              address,

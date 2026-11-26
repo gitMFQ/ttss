@@ -55,6 +55,15 @@
               <select id="service"><option value="edge">Edge 大声朗读</option><option value="ms">微软翻译</option></select>
               <small id="service-hint" class="muted">免费 · 稳定自然的 Neural 音色</small>
             </div>
+            <div class="field" id="edge-endpoint-field">
+              <label for="edge-endpoint">Edge 端点</label>
+              <select id="edge-endpoint">
+                <option value="">自动（v2 优先，失败回退 v1）</option>
+                <option value="v2">v2（api.msedgeservices.com）</option>
+                <option value="v1">v1（speech.platform.bing.com）</option>
+              </select>
+              <small class="muted">仅 Edge 通道生效；不指定时自动回退</small>
+            </div>
             <div class="field">
               <label for="locale">地区 / 语言</label>
               <select id="locale"><option value="">加载中…</option></select>
